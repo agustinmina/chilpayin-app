@@ -26,7 +26,7 @@ if (!firebase.apps.length) {
 const auth = firebase.auth();
 const db = firebase.firestore();
 
-// 4. Precios y equivalencias (Refresco actualizado a $30)
+// 4. Precios y equivalencias
 const PRECIOS = { 
   entero: 150, mitad: 80, paquete15: 245, paquete2: 310, 
   tortillaMedio: 12, tortillaKilo: 24, refresco: 30 
@@ -67,16 +67,13 @@ function App() {
   });
   
   const [nuevoGasto, setNuevoGasto] = useState({ descripcion: '', monto: '' });
-  const [ingresoPollo, setIngresoPollo] = useState('');
-  const [ingresoRefresco, setIngresoRefresco] = useState('');
-  const [tortillaProv, setTortillaProv] = useState({ dejo: 0, regreso: 0 });
   
+  // Nuevo Estado: Inventario Centralizado por Día
+  const [invDiario, setInvDiario] = useState({});
   const hoyStr = new Date().toLocaleDateString('es-MX');
 
   const [ventas, setVentas] = useState([]);
   const [gastos, setGastos] = useState([]);
-  const [stockPollos, setStockPollos] = useState(0);
-  const [stockRefrescos, setStockRefrescos] = useState(0);
 
   // Iniciar sesión y conectar base de datos
   useEffect(() => {
@@ -98,18 +95,12 @@ function App() {
       setGastos(g.sort((a, b) => b.id - a.id));
     });
 
-    const unsubStock = db.collection('config').doc('stock').onSnapshot((docSnap) => {
-      if (docSnap.exists) {
-        setStockPollos(docSnap.data().pollos || 0);
-        setStockRefrescos(docSnap.data().refrescos || 0);
-      }
+    // Cargar Inventario Específico del Día Actual
+    const unsubInv = db.collection('inventario_diario').doc(hoyStr.replace(/\//g, '-')).onSnapshot((doc) => {
+      if (doc.exists) setInvDiario(doc.data());
     });
 
-    const unsubTortilla = db.collection('inventario_tortilla').doc(hoyStr.replace(/\//g, '-')).onSnapshot((doc) => {
-      if (doc.exists) setTortillaProv(doc.data());
-    });
-
-    return () => { unsubVentas(); unsubGastos(); unsubStock(); unsubTortilla(); };
+    return () => { unsubVentas(); unsubGastos(); unsubInv(); };
   }, [user]);
 
   // Funciones lógicas
@@ -132,26 +123,12 @@ function App() {
     }
   };
 
-  const agregarStockPollo = async (e) => {
-    e.preventDefault();
-    const cantidad = parseFloat(ingresoPollo);
-    if (isNaN(cantidad) || cantidad <= 0) return setModalAlerta({ visible: true, mensaje: "Ingresa cantidad válida." });
-    if (user) await db.collection('config').doc('stock').set({ pollos: stockPollos + cantidad }, { merge: true });
-    setIngresoPollo('');
-  };
-
-  const agregarStockRefresco = async (e) => {
-    e.preventDefault();
-    const cantidad = parseInt(ingresoRefresco);
-    if (isNaN(cantidad) || cantidad <= 0) return setModalAlerta({ visible: true, mensaje: "Ingresa cantidad válida." });
-    if (user) await db.collection('config').doc('stock').set({ refrescos: stockRefrescos + cantidad }, { merge: true });
-    setIngresoRefresco('');
-  };
-
-  const actualizarTortillaProv = async (campo, valor) => {
-    const nuevaData = { ...tortillaProv, [campo]: parseFloat(valor) || 0 };
-    setTortillaProv(nuevaData);
-    await db.collection('inventario_tortilla').doc(hoyStr.replace(/\//g, '-')).set(nuevaData);
+  // Función maestra para actualizar cualquier campo del inventario diario
+  const actualizarInvDiario = async (campo, valor) => {
+    const newVal = valor === '' ? '' : (parseFloat(valor) || 0);
+    const nuevaData = { ...invDiario, [campo]: newVal };
+    setInvDiario(nuevaData);
+    if (user) await db.collection('inventario_diario').doc(hoyStr.replace(/\//g, '-')).set(nuevaData, { merge: true });
   };
 
   // Cálculos de la orden
@@ -177,10 +154,6 @@ function App() {
     };
 
     await db.collection('ventas').add(nuevaVenta);
-    await db.collection('config').doc('stock').set({
-        pollos: stockPollos - pollosOrden, refrescos: stockRefrescos - refrescosOrden
-    }, { merge: true });
-    
     setOrden({ entero: 0, mitad: 0, paquete15: 0, paquete2: 0, tortillaMedio: 0, tortillaKilo: 0, refresco: 0, domicilio: '', notasEnvio: '', metodoPago: 'efectivo' });
   };
 
@@ -198,15 +171,7 @@ function App() {
       visible: true, mensaje: `¿Eliminar permanentemente de tu base de datos?`,
       action: async () => {
         if (!user) return;
-        if (tipo === 'venta') {
-          const v = ventas.find(v => v.id === idOriginal);
-          if (v) {
-            await db.collection('ventas').doc(dbId).delete();
-            await db.collection('config').doc('stock').set({
-                pollos: stockPollos + v.pollosTotales, refrescos: stockRefrescos + (v.refrescosTotales || 0)
-            }, { merge: true });
-          }
-        }
+        if (tipo === 'venta') await db.collection('ventas').doc(dbId).delete();
         if (tipo === 'gasto') await db.collection('gastos').doc(dbId).delete();
       }
     });
@@ -221,7 +186,7 @@ function App() {
       acc.ingresoEfectivo += v.metodoPago === 'efectivo' ? v.total : 0;
       acc.ingresoTransferencia += v.metodoPago === 'transferencia' ? v.total : 0;
       acc.pollos += v.pollosTotales;
-      acc.refrescosVendidos = (acc.refrescosVendidos || 0) + (v.detalles.refresco || 0);
+      acc.refrescosVendidos += (v.detalles.refresco || 0);
       acc.paquete15Vendidos += (v.detalles.paquete15 || 0);
       acc.paquete2Vendidos += (v.detalles.paquete2 || 0);
       return acc;
@@ -233,8 +198,12 @@ function App() {
   // Descuentos de paquetes (15 por paq 1.5 / 10 por paq 2)
   const descPaquetesHoy = (resHoy.paquete15Vendidos * 15) + (resHoy.paquete2Vendidos * 10);
   
+  // Cálculo preciso de Stock Restante (Inicial - Vendidos - Mermas)
+  const pollosRestantes = (invDiario.pollosInicial || 0) - resHoy.pollos - (invDiario.pollosMerma || 0);
+  const refrescosRestantes = (invDiario.refrescosInicial || 0) - resHoy.refrescosVendidos - (invDiario.refrescosMerma || 0);
+
   // Cálculo pago de tortillas
-  const kgVendidosTortilla = (tortillaProv.dejo || 0) - (tortillaProv.regreso || 0);
+  const kgVendidosTortilla = (invDiario.tortillaDejo || 0) - (invDiario.tortillaRegreso || 0);
   const pagoTortillaProveedor = kgVendidosTortilla * 21; // $21 por kilo al proveedor
 
   // Efectivo Final Físico
@@ -452,43 +421,55 @@ function App() {
         {esPatron && vista === 'cierre' && (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             
-            {/* Columna Izquierda: Stock e Inventario Tortilla */}
+            {/* Columna Izquierda: Stock e Inventario Diario */}
             <div className="space-y-6">
               <div className="bg-white p-6 rounded-xl shadow-lg border-t-4 border-indigo-500">
-                <h3 className="font-black text-gray-800 text-lg mb-4">Control de Stock (Pollos y Refrescos)</h3>
+                <h3 className="font-black text-gray-800 text-lg mb-4">Inventario Diario (Pollos y Refrescos)</h3>
                 <div className="space-y-4">
                   
                   {/* Desglose Pollos */}
-                  <div className="bg-indigo-50 p-4 rounded-lg flex flex-col gap-2 border border-indigo-100">
-                    <div className="flex justify-between text-indigo-800 font-bold">
-                      <span>Pollos Vendidos Hoy:</span>
+                  <div className="bg-indigo-50 p-4 rounded-lg border border-indigo-100">
+                    <div className="grid grid-cols-2 gap-2 mb-3">
+                       <div>
+                          <label className="text-xs font-bold text-gray-500 uppercase">1. Stock Inicial:</label>
+                          <input type="number" step="0.5" value={invDiario.pollosInicial === undefined ? '' : invDiario.pollosInicial} onChange={(e) => actualizarInvDiario('pollosInicial', e.target.value)} className="w-full p-2 border rounded text-center font-bold outline-none focus:border-indigo-500" placeholder="0" />
+                       </div>
+                       <div>
+                          <label className="text-xs font-bold text-gray-500 uppercase">2. Mermas / Consumo:</label>
+                          <input type="number" step="0.5" value={invDiario.pollosMerma === undefined ? '' : invDiario.pollosMerma} onChange={(e) => actualizarInvDiario('pollosMerma', e.target.value)} className="w-full p-2 border rounded text-center font-bold outline-none text-red-600 focus:border-red-500" placeholder="0" />
+                       </div>
+                    </div>
+                    <div className="flex justify-between text-indigo-800 font-bold mb-1">
+                      <span>3. Vendidos Hoy:</span>
                       <span>{resHoy.pollos}</span>
                     </div>
-                    <div className="flex justify-between items-center border-t border-indigo-200 pt-2 mt-1">
-                      <span className="font-black text-indigo-900">Restantes en Stock:</span>
-                      <span className={`text-2xl font-black ${stockPollos <= 5 ? 'text-red-600' : 'text-indigo-600'}`}>{stockPollos}</span>
+                    <div className="flex justify-between items-center border-t border-indigo-200 pt-2 mt-2">
+                      <span className="font-black text-indigo-900">Restantes Reales:</span>
+                      <span className={`text-3xl font-black ${pollosRestantes <= 5 ? 'text-red-600' : 'text-indigo-600'}`}>{pollosRestantes}</span>
                     </div>
                   </div>
-                  <form onSubmit={agregarStockPollo} className="flex gap-2">
-                    <input type="number" step="0.5" placeholder="Ingresar Pollos al Stock" value={ingresoPollo} onChange={(e) => setIngresoPollo(e.target.value)} className="flex-1 border p-2 rounded text-center font-bold outline-none focus:border-indigo-500" />
-                    <button type="submit" className="bg-indigo-600 text-white px-4 rounded font-bold">Sumar</button>
-                  </form>
 
                   {/* Desglose Refrescos */}
-                  <div className="bg-blue-50 p-4 rounded-lg flex flex-col gap-2 border border-blue-100 mt-4">
-                    <div className="flex justify-between text-blue-800 font-bold">
-                      <span>Refrescos Vendidos Hoy:</span>
+                  <div className="bg-blue-50 p-4 rounded-lg border border-blue-100 mt-4">
+                    <div className="grid grid-cols-2 gap-2 mb-3">
+                       <div>
+                          <label className="text-xs font-bold text-gray-500 uppercase">1. Stock Inicial:</label>
+                          <input type="number" value={invDiario.refrescosInicial === undefined ? '' : invDiario.refrescosInicial} onChange={(e) => actualizarInvDiario('refrescosInicial', e.target.value)} className="w-full p-2 border rounded text-center font-bold outline-none focus:border-blue-500" placeholder="0" />
+                       </div>
+                       <div>
+                          <label className="text-xs font-bold text-gray-500 uppercase">2. Mermas / Consumo:</label>
+                          <input type="number" value={invDiario.refrescosMerma === undefined ? '' : invDiario.refrescosMerma} onChange={(e) => actualizarInvDiario('refrescosMerma', e.target.value)} className="w-full p-2 border rounded text-center font-bold outline-none text-red-600 focus:border-red-500" placeholder="0" />
+                       </div>
+                    </div>
+                    <div className="flex justify-between text-blue-800 font-bold mb-1">
+                      <span>3. Vendidos Hoy:</span>
                       <span>{resHoy.refrescosVendidos}</span>
                     </div>
-                    <div className="flex justify-between items-center border-t border-blue-200 pt-2 mt-1">
-                      <span className="font-black text-blue-900">Restantes en Stock:</span>
-                      <span className={`text-2xl font-black ${stockRefrescos <= 5 ? 'text-red-600' : 'text-blue-600'}`}>{stockRefrescos}</span>
+                    <div className="flex justify-between items-center border-t border-blue-200 pt-2 mt-2">
+                      <span className="font-black text-blue-900">Restantes Reales:</span>
+                      <span className={`text-3xl font-black ${refrescosRestantes <= 5 ? 'text-red-600' : 'text-blue-600'}`}>{refrescosRestantes}</span>
                     </div>
                   </div>
-                  <form onSubmit={agregarStockRefresco} className="flex gap-2">
-                    <input type="number" placeholder="Ingresar Refrescos al Stock" value={ingresoRefresco} onChange={(e) => setIngresoRefresco(e.target.value)} className="flex-1 border p-2 rounded text-center font-bold outline-none focus:border-blue-500" />
-                    <button type="submit" className="bg-blue-600 text-white px-4 rounded font-bold">Sumar</button>
-                  </form>
                 </div>
               </div>
 
@@ -497,11 +478,11 @@ function App() {
                 <div className="grid grid-cols-2 gap-4 mb-4">
                   <div>
                     <label className="text-xs font-bold text-gray-500 uppercase">KG Que Dejó:</label>
-                    <input type="number" value={tortillaProv.dejo} onChange={(e) => actualizarTortillaProv('dejo', e.target.value)} className="w-full p-2 border rounded text-center text-lg font-bold" />
+                    <input type="number" value={invDiario.tortillaDejo === undefined ? '' : invDiario.tortillaDejo} onChange={(e) => actualizarInvDiario('tortillaDejo', e.target.value)} className="w-full p-2 border rounded text-center text-lg font-bold" placeholder="0" />
                   </div>
                   <div>
                     <label className="text-xs font-bold text-gray-500 uppercase">KG Que Regresa:</label>
-                    <input type="number" value={tortillaProv.regreso} onChange={(e) => actualizarTortillaProv('regreso', e.target.value)} className="w-full p-2 border rounded text-center text-lg font-bold" />
+                    <input type="number" value={invDiario.tortillaRegreso === undefined ? '' : invDiario.tortillaRegreso} onChange={(e) => actualizarInvDiario('tortillaRegreso', e.target.value)} className="w-full p-2 border rounded text-center text-lg font-bold" placeholder="0" />
                   </div>
                 </div>
                 <div className="bg-yellow-50 p-3 rounded flex justify-between items-center border border-yellow-200">
@@ -512,7 +493,7 @@ function App() {
             </div>
 
             {/* Columna Derecha: Corte de Caja Maestro */}
-            <div className="bg-white p-6 rounded-xl shadow-lg border-t-4 border-green-500">
+            <div className="bg-white p-6 rounded-xl shadow-lg border-t-4 border-green-500 h-fit">
               <h3 className="font-black text-gray-800 text-lg mb-4">Corte de Caja (Hoy)</h3>
               <div className="space-y-2 text-sm font-bold text-gray-600">
                 <div className="flex justify-between p-2 bg-gray-50 rounded"><span>Ventas Totales (Bruto):</span> <span>${resHoy.ventasTotales.toFixed(2)}</span></div>
