@@ -1,0 +1,10 @@
+{
+  "name": "chilpayin-app",
+  "version": "1.0.0",
+  "dependencies": {
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "firebase": "12.14.0",
+    "lucide-react": "1.17.0"
+  }
+}
