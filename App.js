@@ -26,10 +26,10 @@ if (!firebase.apps.length) {
 const auth = firebase.auth();
 const db = firebase.firestore();
 
-// 4. Precios y equivalencias
+// 4. Precios y equivalencias (Refresco actualizado a $30)
 const PRECIOS = { 
   entero: 150, mitad: 80, paquete15: 245, paquete2: 310, 
-  tortillaMedio: 12, tortillaKilo: 24, refresco: 15 
+  tortillaMedio: 12, tortillaKilo: 24, refresco: 30 
 };
 const EQUIVALENCIA_POLLOS = { entero: 1, mitad: 0.5, paquete15: 1.5, paquete2: 2 };
 const PIN_PATRON = "1234";
@@ -221,10 +221,11 @@ function App() {
       acc.ingresoEfectivo += v.metodoPago === 'efectivo' ? v.total : 0;
       acc.ingresoTransferencia += v.metodoPago === 'transferencia' ? v.total : 0;
       acc.pollos += v.pollosTotales;
+      acc.refrescosVendidos = (acc.refrescosVendidos || 0) + (v.detalles.refresco || 0);
       acc.paquete15Vendidos += (v.detalles.paquete15 || 0);
       acc.paquete2Vendidos += (v.detalles.paquete2 || 0);
       return acc;
-    }, { ventasTotales: 0, ingresoEfectivo: 0, ingresoTransferencia: 0, pollos: 0, paquete15Vendidos: 0, paquete2Vendidos: 0, totalGastos: listaGastos.reduce((sum, g) => sum + g.monto, 0) });
+    }, { ventasTotales: 0, ingresoEfectivo: 0, ingresoTransferencia: 0, pollos: 0, refrescosVendidos: 0, paquete15Vendidos: 0, paquete2Vendidos: 0, totalGastos: listaGastos.reduce((sum, g) => sum + g.monto, 0) });
   };
 
   const resHoy = calcularResumen(ventasHoy, gastosHoy);
@@ -456,21 +457,36 @@ function App() {
               <div className="bg-white p-6 rounded-xl shadow-lg border-t-4 border-indigo-500">
                 <h3 className="font-black text-gray-800 text-lg mb-4">Control de Stock (Pollos y Refrescos)</h3>
                 <div className="space-y-4">
-                  <div className="bg-indigo-50 p-4 rounded-lg flex justify-between items-center border border-indigo-100">
-                    <span className="font-bold text-indigo-900">Pollos en Stock:</span>
-                    <span className={`text-2xl font-black ${stockPollos <= 5 ? 'text-red-600' : 'text-indigo-600'}`}>{stockPollos}</span>
+                  
+                  {/* Desglose Pollos */}
+                  <div className="bg-indigo-50 p-4 rounded-lg flex flex-col gap-2 border border-indigo-100">
+                    <div className="flex justify-between text-indigo-800 font-bold">
+                      <span>Pollos Vendidos Hoy:</span>
+                      <span>{resHoy.pollos}</span>
+                    </div>
+                    <div className="flex justify-between items-center border-t border-indigo-200 pt-2 mt-1">
+                      <span className="font-black text-indigo-900">Restantes en Stock:</span>
+                      <span className={`text-2xl font-black ${stockPollos <= 5 ? 'text-red-600' : 'text-indigo-600'}`}>{stockPollos}</span>
+                    </div>
                   </div>
                   <form onSubmit={agregarStockPollo} className="flex gap-2">
-                    <input type="number" step="0.5" placeholder="Ingresar Pollos" value={ingresoPollo} onChange={(e) => setIngresoPollo(e.target.value)} className="flex-1 border p-2 rounded text-center font-bold outline-none focus:border-indigo-500" />
+                    <input type="number" step="0.5" placeholder="Ingresar Pollos al Stock" value={ingresoPollo} onChange={(e) => setIngresoPollo(e.target.value)} className="flex-1 border p-2 rounded text-center font-bold outline-none focus:border-indigo-500" />
                     <button type="submit" className="bg-indigo-600 text-white px-4 rounded font-bold">Sumar</button>
                   </form>
 
-                  <div className="bg-blue-50 p-4 rounded-lg flex justify-between items-center border border-blue-100 mt-4">
-                    <span className="font-bold text-blue-900">Refrescos en Stock:</span>
-                    <span className={`text-2xl font-black ${stockRefrescos <= 5 ? 'text-red-600' : 'text-blue-600'}`}>{stockRefrescos}</span>
+                  {/* Desglose Refrescos */}
+                  <div className="bg-blue-50 p-4 rounded-lg flex flex-col gap-2 border border-blue-100 mt-4">
+                    <div className="flex justify-between text-blue-800 font-bold">
+                      <span>Refrescos Vendidos Hoy:</span>
+                      <span>{resHoy.refrescosVendidos}</span>
+                    </div>
+                    <div className="flex justify-between items-center border-t border-blue-200 pt-2 mt-1">
+                      <span className="font-black text-blue-900">Restantes en Stock:</span>
+                      <span className={`text-2xl font-black ${stockRefrescos <= 5 ? 'text-red-600' : 'text-blue-600'}`}>{stockRefrescos}</span>
+                    </div>
                   </div>
                   <form onSubmit={agregarStockRefresco} className="flex gap-2">
-                    <input type="number" placeholder="Ingresar Refrescos" value={ingresoRefresco} onChange={(e) => setIngresoRefresco(e.target.value)} className="flex-1 border p-2 rounded text-center font-bold outline-none focus:border-blue-500" />
+                    <input type="number" placeholder="Ingresar Refrescos al Stock" value={ingresoRefresco} onChange={(e) => setIngresoRefresco(e.target.value)} className="flex-1 border p-2 rounded text-center font-bold outline-none focus:border-blue-500" />
                     <button type="submit" className="bg-blue-600 text-white px-4 rounded font-bold">Sumar</button>
                   </form>
                 </div>
