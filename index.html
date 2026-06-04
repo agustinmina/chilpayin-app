@@ -1,12 +1,24 @@
 <!DOCTYPE html>
 <html lang="es">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>El Chilpayin</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-  </head>
-  <body>
-    <div id="root"></div>
-  </body>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>El Chilpayin</title>
+  
+  <!-- Tailwind para el diseño -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <!-- Librerías de React para que el navegador entienda el sistema -->
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  
+  <!-- Babel para traducir tu código de App.js -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+<body>
+  <div id="root"></div>
+  
+  <!-- Aquí finalmente conectamos tu lógica de ventas -->
+  <script type="text/babel" src="./App.js"></script>
+</body>
 </html>
