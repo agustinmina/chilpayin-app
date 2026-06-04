@@ -12,7 +12,7 @@ const Iconos = {
 
 // 3. Tu conexión exacta a Firebase (El Chilpayin)
 const firebaseConfig = {
-  apiKey: "AIzaSyB_CBmUwgFviyffpFpJ08n_WCfLBIXZVaw",
+  apiKey: "AIzaSyB_CBmUwgFviyffpFpJ08n_WCflBIXZVaw",
   authDomain: "chilpayin-4158c.firebaseapp.com",
   projectId: "chilpayin-4158c",
   storageBucket: "chilpayin-4158c.firebasestorage.app",
