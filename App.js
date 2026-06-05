@@ -26,7 +26,7 @@ if (!firebase.apps.length) {
 const auth = firebase.auth();
 const db = firebase.firestore();
 
-// 4. Precios y equivalencias (Aplica para Asados y Crujientes)
+// 4. Precios y equivalencias
 const PRECIOS = { 
   entero: 150, mitad: 80, paquete15: 245, paquete2: 310, 
   tortillaMedio: 12, tortillaKilo: 24, refresco: 30 
@@ -68,8 +68,13 @@ function App() {
   });
   
   const [nuevoGasto, setNuevoGasto] = useState({ descripcion: '', monto: '' });
+  
+  // Inputs manuales de stock
   const [ingresoPollo, setIngresoPollo] = useState('');
   const [ingresoRefresco, setIngresoRefresco] = useState('');
+  const [mermaPollo, setMermaPollo] = useState('');
+  const [mermaRefresco, setMermaRefresco] = useState('');
+  
   const [tortillaProv, setTortillaProv] = useState({ dejo: 0, regreso: 0 });
   const [entradasHoy, setEntradasHoy] = useState({ pollos: 0, refrescos: 0 });
   
@@ -146,6 +151,7 @@ function App() {
     }
   };
 
+  // Stock Permanente
   const agregarStockPollo = async (e) => {
     e.preventDefault();
     const cantidad = parseFloat(ingresoPollo);
@@ -155,6 +161,14 @@ function App() {
       await db.collection('entradas_diarias').doc(hoyStr.replace(/\//g, '-')).set({ pollos: (entradasHoy.pollos || 0) + cantidad }, { merge: true });
     }
     setIngresoPollo('');
+  };
+
+  const restarMermaPollo = async (e) => {
+    e.preventDefault();
+    const cantidad = parseFloat(mermaPollo);
+    if (isNaN(cantidad) || cantidad <= 0) return setModalAlerta({ visible: true, mensaje: "Ingresa cantidad válida." });
+    if (user) await db.collection('config').doc('stock').set({ pollos: stockPollos - cantidad }, { merge: true });
+    setMermaPollo('');
   };
 
   const agregarStockRefresco = async (e) => {
@@ -168,13 +182,21 @@ function App() {
     setIngresoRefresco('');
   };
 
+  const restarMermaRefresco = async (e) => {
+    e.preventDefault();
+    const cantidad = parseInt(mermaRefresco);
+    if (isNaN(cantidad) || cantidad <= 0) return setModalAlerta({ visible: true, mensaje: "Ingresa cantidad válida." });
+    if (user) await db.collection('config').doc('stock').set({ refrescos: stockRefrescos - cantidad }, { merge: true });
+    setMermaRefresco('');
+  };
+
   const actualizarTortillaProv = async (campo, valor) => {
     const nuevaData = { ...tortillaProv, [campo]: parseFloat(valor) || 0 };
     setTortillaProv(nuevaData);
     await db.collection('inventario_tortilla').doc(hoyStr.replace(/\//g, '-')).set(nuevaData);
   };
 
-  // Cálculos de la orden integrando crujientes y envíos
+  // Cálculos de la orden
   const subtotalPollo = (orden.entero || 0) * PRECIOS.entero + (orden.mitad || 0) * PRECIOS.mitad + (orden.paquete15 || 0) * PRECIOS.paquete15 + (orden.paquete2 || 0) * PRECIOS.paquete2;
   const subtotalCrujiente = (orden.crujienteEntero || 0) * PRECIOS.entero + (orden.crujienteMitad || 0) * PRECIOS.mitad + (orden.crujientePaq15 || 0) * PRECIOS.paquete15 + (orden.crujientePaq2 || 0) * PRECIOS.paquete2;
   const subtotalComplementos = (orden.tortillaMedio || 0) * PRECIOS.tortillaMedio + (orden.tortillaKilo || 0) * PRECIOS.tortillaKilo + (orden.refresco || 0) * PRECIOS.refresco;
@@ -250,14 +272,17 @@ function App() {
       acc.paquete15Vendidos += (v.detalles.paquete15 || 0) + (v.detalles.crujientePaq15 || 0);
       acc.paquete2Vendidos += (v.detalles.paquete2 || 0) + (v.detalles.crujientePaq2 || 0);
       
-      // Control de Envíos
       if (v.tipo === 'domicilio') {
           acc.cantidadEnvios += 1;
+          if (v.metodoPago === 'efectivo') {
+              acc.costoEnvioEfectivo += (v.costoEnvio || 0);
+          } else {
+              acc.costoEnvioTransferencia += (v.costoEnvio || 0);
+          }
       }
-      acc.totalCostoEnvio += (v.costoEnvio || 0);
 
       return acc;
-    }, { ventasTotales: 0, ingresoEfectivo: 0, ingresoTransferencia: 0, pollos: 0, refrescosVendidos: 0, paquete15Vendidos: 0, paquete2Vendidos: 0, cantidadEnvios: 0, totalCostoEnvio: 0, totalGastos: listaGastos.reduce((sum, g) => sum + g.monto, 0) });
+    }, { ventasTotales: 0, ingresoEfectivo: 0, ingresoTransferencia: 0, pollos: 0, refrescosVendidos: 0, paquete15Vendidos: 0, paquete2Vendidos: 0, cantidadEnvios: 0, costoEnvioEfectivo: 0, costoEnvioTransferencia: 0, totalGastos: listaGastos.reduce((sum, g) => sum + g.monto, 0) });
   };
 
   const resHoy = calcularResumen(ventasHoy, gastosHoy);
@@ -268,10 +293,11 @@ function App() {
   const descPaquetesHoy = (resHoy.paquete15Vendidos * 15) + (resHoy.paquete2Vendidos * 10);
   const kgVendidosTortilla = (tortillaProv.dejo || 0) - (tortillaProv.regreso || 0);
   const pagoTortillaProveedor = kgVendidosTortilla * 21; 
-  const pagoEnviosRepartidor = resHoy.totalCostoEnvio;
+  
+  // OJO AQUÍ: Solo descontamos de caja el pago al repartidor en efectivo
+  const pagoEnviosRepartidorEfectivo = resHoy.costoEnvioEfectivo || 0;
 
-  // Cálculo físico final con Descuento de Envíos
-  const corteNetoFisicoHoy = resHoy.ingresoEfectivo - descPaquetesHoy - resHoy.totalGastos - pagoTortillaProveedor - pagoEnviosRepartidor;
+  const corteNetoFisicoHoy = resHoy.ingresoEfectivo - descPaquetesHoy - resHoy.totalGastos - pagoTortillaProveedor - pagoEnviosRepartidorEfectivo;
 
   const historialDias = useMemo(() => {
     const grupos = {};
@@ -367,7 +393,6 @@ function App() {
                 </div>
                 <form onSubmit={(e) => registrarVenta(e, vista)} className="p-4 space-y-4">
                   
-                  {/* SECCIÓN ASADOS */}
                   <div className="space-y-3">
                     <h3 className="text-xs font-black text-gray-400 uppercase tracking-widest border-b pb-1 mb-2">Pollo Asado</h3>
                     <ProductoInput nombre="Pollo Entero" desc={`$${PRECIOS.entero}`} name="entero" value={orden.entero} onChange={handleOrdenChange} />
@@ -376,7 +401,6 @@ function App() {
                     <ProductoInput nombre="Paquete 2 Pollos" desc={`$${PRECIOS.paquete2}`} name="paquete2" value={orden.paquete2} onChange={handleOrdenChange} />
                   </div>
 
-                  {/* SECCIÓN CRUJIENTES */}
                   <div className="space-y-3 pt-2">
                     <h3 className="text-xs font-black text-gray-400 uppercase tracking-widest border-b pb-1 mb-2 text-orange-600">Pollo Crujiente</h3>
                     <ProductoInput nombre="Crujiente Entero" desc={`$${PRECIOS.entero}`} name="crujienteEntero" value={orden.crujienteEntero} onChange={handleOrdenChange} />
@@ -505,60 +529,49 @@ function App() {
             {/* Columna Izquierda: Stock e Inventario Tortilla */}
             <div className="space-y-6">
               <div className="bg-white p-6 rounded-xl shadow-lg border-t-4 border-indigo-500">
-                <h3 className="font-black text-gray-800 text-lg mb-4">Stock del Día (Pollos y Refrescos)</h3>
+                <h3 className="font-black text-gray-800 text-lg mb-4">Stock de Mercancía Físico</h3>
                 <div className="space-y-4">
                   
                   {/* Desglose Pollos */}
                   <div className="bg-indigo-50 p-4 rounded-lg flex flex-col gap-2 border border-indigo-100">
-                    <div className="flex justify-between text-indigo-900 font-bold text-sm">
-                      <span>Iniciamos Hoy Con:</span>
-                      <span>{pollosInicialHoy}</span>
+                    <div className="flex justify-between items-center border-b border-indigo-200 pb-2 mb-1">
+                      <span className="font-black text-indigo-900">Stock Real en Hielera:</span>
+                      <span className={`text-4xl font-black ${stockPollos <= 5 ? 'text-red-600' : 'text-indigo-600'}`}>{stockPollos}</span>
                     </div>
-                    {entradasHoy.pollos > 0 && (
-                      <div className="flex justify-between text-indigo-500 font-bold text-sm">
-                        <span>+ Ingresados Hoy:</span>
-                        <span>{entradasHoy.pollos}</span>
-                      </div>
-                    )}
-                    <div className="flex justify-between text-red-700 font-bold text-sm">
-                      <span>- Vendidos Hoy:</span>
-                      <span>{resHoy.pollos}</span>
-                    </div>
-                    <div className="flex justify-between items-center border-t border-indigo-200 pt-2 mt-1">
-                      <span className="font-black text-indigo-900">Stock Actual Físico:</span>
-                      <span className={`text-3xl font-black ${stockPollos <= 5 ? 'text-red-600' : 'text-indigo-600'}`}>{stockPollos}</span>
+                    <form onSubmit={agregarStockPollo} className="flex gap-2">
+                      <input type="number" step="0.5" placeholder="Sumar Compras (+)" value={ingresoPollo} onChange={(e) => setIngresoPollo(e.target.value)} className="flex-1 border p-2 rounded text-center font-bold outline-none focus:border-indigo-500" />
+                      <button type="submit" className="bg-indigo-600 text-white px-4 rounded font-bold">Sumar</button>
+                    </form>
+                    <form onSubmit={restarMermaPollo} className="flex gap-2 mt-1">
+                      <input type="number" step="0.5" placeholder="Restar Mermas/Consumo (-)" value={mermaPollo} onChange={(e) => setMermaPollo(e.target.value)} className="flex-1 border border-red-300 p-2 rounded text-center font-bold outline-none text-red-600 focus:border-red-500" />
+                      <button type="submit" className="bg-red-600 text-white px-4 rounded font-bold">Restar</button>
+                    </form>
+                    <div className="flex justify-between text-indigo-800 font-bold text-xs mt-2 opacity-80">
+                      <span>Iniciaste el día con: {pollosInicialHoy}</span>
+                      <span>Vendidos hoy: {resHoy.pollos}</span>
                     </div>
                   </div>
-                  <form onSubmit={agregarStockPollo} className="flex gap-2">
-                    <input type="number" step="0.5" placeholder="Ingresar Pollos al Stock" value={ingresoPollo} onChange={(e) => setIngresoPollo(e.target.value)} className="flex-1 border p-2 rounded text-center font-bold outline-none focus:border-indigo-500" />
-                    <button type="submit" className="bg-indigo-600 text-white px-4 rounded font-bold">Sumar</button>
-                  </form>
 
                   {/* Desglose Refrescos */}
                   <div className="bg-blue-50 p-4 rounded-lg flex flex-col gap-2 border border-blue-100 mt-4">
-                    <div className="flex justify-between text-blue-900 font-bold text-sm">
-                      <span>Iniciamos Hoy Con:</span>
-                      <span>{refrescosInicialHoy}</span>
+                    <div className="flex justify-between items-center border-b border-blue-200 pb-2 mb-1">
+                      <span className="font-black text-blue-900">Refrescos Reales:</span>
+                      <span className={`text-4xl font-black ${stockRefrescos <= 5 ? 'text-red-600' : 'text-blue-600'}`}>{stockRefrescos}</span>
                     </div>
-                    {entradasHoy.refrescos > 0 && (
-                      <div className="flex justify-between text-blue-500 font-bold text-sm">
-                        <span>+ Ingresados Hoy:</span>
-                        <span>{entradasHoy.refrescos}</span>
-                      </div>
-                    )}
-                    <div className="flex justify-between text-red-700 font-bold text-sm">
-                      <span>- Vendidos Hoy (Sueltos + Paq):</span>
-                      <span>{resHoy.refrescosVendidos}</span>
-                    </div>
-                    <div className="flex justify-between items-center border-t border-blue-200 pt-2 mt-1">
-                      <span className="font-black text-blue-900">Stock Actual Físico:</span>
-                      <span className={`text-3xl font-black ${stockRefrescos <= 5 ? 'text-red-600' : 'text-blue-600'}`}>{stockRefrescos}</span>
+                    <form onSubmit={agregarStockRefresco} className="flex gap-2">
+                      <input type="number" placeholder="Sumar Compras (+)" value={ingresoRefresco} onChange={(e) => setIngresoRefresco(e.target.value)} className="flex-1 border p-2 rounded text-center font-bold outline-none focus:border-blue-500" />
+                      <button type="submit" className="bg-blue-600 text-white px-4 rounded font-bold">Sumar</button>
+                    </form>
+                    <form onSubmit={restarMermaRefresco} className="flex gap-2 mt-1">
+                      <input type="number" placeholder="Restar Mermas/Consumo (-)" value={mermaRefresco} onChange={(e) => setMermaRefresco(e.target.value)} className="flex-1 border border-red-300 p-2 rounded text-center font-bold outline-none text-red-600 focus:border-red-500" />
+                      <button type="submit" className="bg-red-600 text-white px-4 rounded font-bold">Restar</button>
+                    </form>
+                    <div className="flex justify-between text-blue-800 font-bold text-xs mt-2 opacity-80">
+                      <span>Iniciaste el día con: {refrescosInicialHoy}</span>
+                      <span>Vendidos hoy: {resHoy.refrescosVendidos}</span>
                     </div>
                   </div>
-                  <form onSubmit={agregarStockRefresco} className="flex gap-2">
-                    <input type="number" placeholder="Ingresar Refrescos al Stock" value={ingresoRefresco} onChange={(e) => setIngresoRefresco(e.target.value)} className="flex-1 border p-2 rounded text-center font-bold outline-none focus:border-blue-500" />
-                    <button type="submit" className="bg-blue-600 text-white px-4 rounded font-bold">Sumar</button>
-                  </form>
+
                 </div>
               </div>
 
@@ -598,7 +611,10 @@ function App() {
                 <div className="flex justify-between p-2 text-red-600"><span>Gastos Físicos:</span> <span>-${resHoy.totalGastos.toFixed(2)}</span></div>
                 <div className="flex justify-between p-2 text-orange-600"><span>Desc. Paquetes ($15 y $10):</span> <span>-${descPaquetesHoy.toFixed(2)}</span></div>
                 <div className="flex justify-between p-2 text-yellow-600"><span>Pago Tortilla Proveedor:</span> <span>-${pagoTortillaProveedor.toFixed(2)}</span></div>
-                <div className="flex justify-between p-2 text-blue-600"><span>Pago a Repartidores (Envío):</span> <span>-${pagoEnviosRepartidor.toFixed(2)}</span></div>
+                <div className="flex justify-between p-2 text-blue-600"><span>Pago a Repartidores (En Efectivo):</span> <span>-${pagoEnviosRepartidorEfectivo.toFixed(2)}</span></div>
+                {resHoy.costoEnvioTransferencia > 0 && (
+                   <div className="flex justify-between p-2 text-purple-600"><span>Pago a Repartidores (En Transferencia):</span> <span>-${resHoy.costoEnvioTransferencia.toFixed(2)}</span></div>
+                )}
               </div>
               <div className="mt-6 p-4 bg-green-600 rounded-lg text-white text-center shadow-inner">
                 <span className="block text-sm uppercase tracking-wider mb-1 font-semibold">Dinero Físico Neto en Caja</span>
@@ -619,19 +635,14 @@ function App() {
                 historialDias.map(dia => {
                   const resDia = calcularResumen(dia.ventas, dia.gastos);
                   
-                  // Calcular los descuentos de ese día
                   const descPaquetesDia = (resDia.paquete15Vendidos * 15) + (resDia.paquete2Vendidos * 10);
-                  
-                  // Recuperar la tortilla de ese día específico
                   const tortillaDia = historialTortillas[dia.fecha.replace(/\//g, '-')] || { dejo: 0, regreso: 0 };
                   const kgTortillaDia = (tortillaDia.dejo || 0) - (tortillaDia.regreso || 0);
                   const pagoTortillaDia = kgTortillaDia * 21;
                   
-                  // Pago de envíos de ese día
-                  const pagoEnviosDia = resDia.totalCostoEnvio;
+                  const pagoEnviosEfectivoDia = resDia.costoEnvioEfectivo || 0;
 
-                  // Cálculo Neto de ese día
-                  const efectivoNetoFisicoDia = resDia.ingresoEfectivo - resDia.totalGastos - descPaquetesDia - pagoTortillaDia - pagoEnviosDia;
+                  const efectivoNetoFisicoDia = resDia.ingresoEfectivo - resDia.totalGastos - descPaquetesDia - pagoTortillaDia - pagoEnviosEfectivoDia;
 
                   return (
                     <div key={dia.fecha} className="p-4 sm:p-6 bg-gray-50">
@@ -660,10 +671,9 @@ function App() {
                         </div>
                         <div className="bg-white p-3 rounded shadow-sm border border-blue-100 text-center">
                           <span className="block text-[10px] text-gray-400 uppercase font-bold">Envíos Pagados</span>
-                          <span className="block text-lg font-black text-blue-600">{resDia.cantidadEnvios} (-${pagoEnviosDia})</span>
+                          <span className="block text-lg font-black text-blue-600">{resDia.cantidadEnvios} (-${pagoEnviosEfectivoDia} Efc)</span>
                         </div>
                         
-                        {/* Bloque verde gigante del dinero real de ese día */}
                         <div className="col-span-2 sm:col-span-3 bg-green-600 p-4 rounded-lg shadow-md text-center text-white mt-2">
                            <span className="block text-xs uppercase font-bold opacity-80 tracking-widest mb-1">Efectivo Físico Neto (Ya con Gastos, Repartidor y Tortillas)</span>
                            <span className="block text-3xl font-black">${efectivoNetoFisicoDia.toFixed(2)}</span>
