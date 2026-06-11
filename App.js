@@ -8,10 +8,10 @@ const Iconos = {
   Calculator: () => <span>🧮</span>, CalendarDays: () => <span>📅</span>, Banknote: () => <span>💵</span>,
   CreditCard: () => <span>💳</span>, PlusCircle: () => <span>➕</span>, ListOrdered: () => <span>📋</span>,
   Trash2: () => <span>🗑️</span>, Download: () => <span>📥</span>, TrendingUp: () => <span>📈</span>,
-  Star: () => <span>⭐</span>
+  Star: () => <span>⭐</span>, Users: () => <span>👥</span>
 };
 
-// 3. Conexión Firebase (El Chilpayin) - LLAVE CONFIRMADA
+// 3. Conexión Firebase (El Chilpayin)
 const firebaseConfig = {
   apiKey: "AIzaSyB_CBmUwgFviyffpFpJ08n_WCflBIXZVaw",
   authDomain: "chilpayin-4158c.firebaseapp.com",
@@ -24,7 +24,6 @@ const firebaseConfig = {
 if (!firebase.apps.length) {
   firebase.initializeApp(firebaseConfig);
 }
-const auth = firebase.auth();
 const db = firebase.firestore();
 
 // 4. Precios y equivalencias
@@ -52,7 +51,6 @@ const ProductoInput = ({ nombre, desc, name, value, onChange }) => (
 
 // 6. LA APLICACIÓN PRINCIPAL
 function App() {
-  const [user, setUser] = useState(null);
   const [vista, setVista] = useState('local');
   const [esPatron, setEsPatron] = useState(false);
 
@@ -75,6 +73,9 @@ function App() {
   const [mermaPollo, setMermaPollo] = useState('');
   const [mermaRefresco, setMermaRefresco] = useState('');
   
+  const [nuevoClienteManual, setNuevoClienteManual] = useState({ telefono: '', nombre: '' });
+  const [clientesAgenda, setClientesAgenda] = useState([]);
+
   const [tortillaProv, setTortillaProv] = useState({ dejo: 0, regreso: 0 });
   const [entradasHoy, setEntradasHoy] = useState({ pollos: 0, refrescos: 0 });
   const [costoPolloUnidad, setCostoPolloUnidad] = useState(72); 
@@ -88,15 +89,8 @@ function App() {
   const [stockPollos, setStockPollos] = useState(0);
   const [stockRefrescos, setStockRefrescos] = useState(0);
 
+  // CONEXIÓN DIRECTA Y SIN BLOQUEOS
   useEffect(() => {
-    auth.signInAnonymously().catch(err => console.error("Error Auth:", err));
-    const unsubscribe = auth.onAuthStateChanged(setUser);
-    return () => unsubscribe();
-  }, []);
-
-  useEffect(() => {
-    if (!user) return;
-    
     const unsubVentas = db.collection('ventas').onSnapshot((snap) => {
       const v = snap.docs.map(d => ({ dbId: d.id, ...d.data() }));
       setVentas(v.sort((a, b) => b.id - a.id));
@@ -105,6 +99,11 @@ function App() {
     const unsubGastos = db.collection('gastos').onSnapshot((snap) => {
       const g = snap.docs.map(d => ({ dbId: d.id, ...d.data() }));
       setGastos(g.sort((a, b) => b.id - a.id));
+    });
+
+    const unsubClientes = db.collection('clientes').onSnapshot((snap) => {
+      const c = snap.docs.map(d => d.data());
+      setClientesAgenda(c);
     });
 
     const unsubStock = db.collection('config').doc('stock').onSnapshot((docSnap) => {
@@ -134,8 +133,8 @@ function App() {
       if (doc.exists) setEntradasHoy(doc.data());
     });
 
-    return () => { unsubVentas(); unsubGastos(); unsubStock(); unsubCostos(); unsubTortilla(); unsubHistorialTortillas(); unsubEntradas(); };
-  }, [user]);
+    return () => { unsubVentas(); unsubGastos(); unsubClientes(); unsubStock(); unsubCostos(); unsubTortilla(); unsubHistorialTortillas(); unsubEntradas(); };
+  }, []);
 
   const ventasHoy = ventas.filter(v => v.fechaDia === hoyStr);
   const gastosHoy = gastos.filter(g => g.fechaDia === hoyStr);
@@ -159,10 +158,15 @@ function App() {
       setOrden(prev => {
         const updated = { ...prev, telefono: numClean };
         if (numClean.length === 10) {
-          const historialCliente = ventas.find(v => v.telefono === numClean);
-          if (historialCliente) {
-            updated.nombreCliente = historialCliente.nombreCliente || '';
-            updated.notasEnvio = historialCliente.notasEnvio || '';
+          const clienteAgenda = clientesAgenda.find(c => c.telefono === numClean);
+          if (clienteAgenda) {
+            updated.nombreCliente = clienteAgenda.nombre;
+          } else {
+            const historialCliente = ventas.find(v => v.telefono === numClean);
+            if (historialCliente) {
+              updated.nombreCliente = historialCliente.nombreCliente || '';
+              updated.notasEnvio = historialCliente.notasEnvio || '';
+            }
           }
         }
         return updated;
@@ -172,8 +176,37 @@ function App() {
     }
   };
 
+  const agregarClienteManual = async (e) => {
+    e.preventDefault();
+    const tel = nuevoClienteManual.telefono.replace(/\D/g, '');
+    if (tel.length !== 10 || !nuevoClienteManual.nombre) {
+      return setModalAlerta({ visible: true, mensaje: "Ingresa 10 dígitos y el nombre." });
+    }
+    try {
+      await db.collection('clientes').doc(tel).set({
+        telefono: tel,
+        nombre: nuevoClienteManual.nombre,
+        agregadoManual: true
+      }, { merge: true });
+      setNuevoClienteManual({ telefono: '', nombre: '' });
+      setModalAlerta({ visible: true, mensaje: "¡Cliente guardado con éxito!" });
+    } catch (error) {
+      setModalAlerta({ visible: true, mensaje: "Aún no se refrescan los permisos. Intenta en 1 minuto." });
+    }
+  };
+
   const clientesVIP = useMemo(() => {
     const mapa = {};
+    clientesAgenda.forEach(c => {
+      mapa[c.telefono] = {
+        telefono: c.telefono,
+        nombre: c.nombre,
+        totalPollos: 0,
+        totalPedidos: 0,
+        fechas: new Set()
+      };
+    });
+
     ventas.forEach(v => {
       if (v.telefono && typeof v.telefono === 'string' && v.telefono.length === 10) {
         if (!mapa[v.telefono]) {
@@ -193,17 +226,16 @@ function App() {
         }
       }
     });
+
     return Object.values(mapa).sort((a, b) => b.totalPollos - a.totalPollos);
-  }, [ventas]);
+  }, [ventas, clientesAgenda]);
 
   const agregarStockPollo = async (e) => {
     e.preventDefault();
     const cantidad = parseFloat(ingresoPollo);
     if (isNaN(cantidad) || cantidad <= 0) return setModalAlerta({ visible: true, mensaje: "Ingresa cantidad válida." });
-    if (user) {
-      await db.collection('config').doc('stock').set({ pollos: stockPollos + cantidad }, { merge: true });
-      await db.collection('entradas_diarias').doc(hoyStr.replace(/\//g, '-')).set({ pollos: (entradasHoy.pollos || 0) + cantidad }, { merge: true });
-    }
+    await db.collection('config').doc('stock').set({ pollos: stockPollos + cantidad }, { merge: true });
+    await db.collection('entradas_diarias').doc(hoyStr.replace(/\//g, '-')).set({ pollos: (entradasHoy.pollos || 0) + cantidad }, { merge: true });
     setIngresoPollo('');
   };
 
@@ -211,7 +243,7 @@ function App() {
     e.preventDefault();
     const cantidad = parseFloat(mermaPollo);
     if (isNaN(cantidad) || cantidad <= 0) return setModalAlerta({ visible: true, mensaje: "Ingresa cantidad válida." });
-    if (user) await db.collection('config').doc('stock').set({ pollos: stockPollos - cantidad }, { merge: true });
+    await db.collection('config').doc('stock').set({ pollos: stockPollos - cantidad }, { merge: true });
     setMermaPollo('');
   };
 
@@ -219,10 +251,8 @@ function App() {
     e.preventDefault();
     const cantidad = parseInt(ingresoRefresco);
     if (isNaN(cantidad) || cantidad <= 0) return setModalAlerta({ visible: true, mensaje: "Ingresa cantidad válida." });
-    if (user) {
-      await db.collection('config').doc('stock').set({ refrescos: stockRefrescos + cantidad }, { merge: true });
-      await db.collection('entradas_diarias').doc(hoyStr.replace(/\//g, '-')).set({ refrescos: (entradasHoy.refrescos || 0) + cantidad }, { merge: true });
-    }
+    await db.collection('config').doc('stock').set({ refrescos: stockRefrescos + cantidad }, { merge: true });
+    await db.collection('entradas_diarias').doc(hoyStr.replace(/\//g, '-')).set({ refrescos: (entradasHoy.refrescos || 0) + cantidad }, { merge: true });
     setIngresoRefresco('');
   };
 
@@ -230,7 +260,7 @@ function App() {
     e.preventDefault();
     const cantidad = parseInt(mermaRefresco);
     if (isNaN(cantidad) || cantidad <= 0) return setModalAlerta({ visible: true, mensaje: "Ingresa cantidad válida." });
-    if (user) await db.collection('config').doc('stock').set({ refrescos: stockRefrescos - cantidad }, { merge: true });
+    await db.collection('config').doc('stock').set({ refrescos: stockRefrescos - cantidad }, { merge: true });
     setMermaRefresco('');
   };
 
@@ -244,7 +274,7 @@ function App() {
     const costo = parseFloat(nuevoCosto);
     if (!isNaN(costo) && costo > 0) {
       setCostoPolloUnidad(costo);
-      if (user) await db.collection('config').doc('costos').set({ costoPollo: costo }, { merge: true });
+      await db.collection('config').doc('costos').set({ costoPollo: costo }, { merge: true });
     }
   };
 
@@ -263,7 +293,6 @@ function App() {
     e.preventDefault();
     if (totalOrden === 0 && costoEnvio === 0) return setModalAlerta({ visible: true, mensaje: "La orden está en ceros." });
     if (tipo === 'domicilio' && !orden.telefono) return setModalAlerta({ visible: true, mensaje: "Ingresa el teléfono del cliente." });
-    if (!user) return setModalAlerta({ visible: true, mensaje: "Conectando a tu base de datos..." });
 
     const nuevaVenta = {
       id: Date.now(), tipo, fechaDia: hoyStr,
@@ -273,17 +302,26 @@ function App() {
       telefono: orden.telefono || '', nombreCliente: orden.nombreCliente || '', notasEnvio: orden.notasEnvio || ''
     };
 
-    await db.collection('ventas').add(nuevaVenta);
-    await db.collection('config').doc('stock').set({ pollos: stockPollos - pollosOrden, refrescos: stockRefrescos - refrescosOrden }, { merge: true });
-    
-    setOrden({ entero: 0, mitad: 0, paquete15: 0, paquete2: 0, crujienteEntero: 0, crujienteMitad: 0, crujientePaq15: 0, crujientePaq2: 0, tortillaMedio: 0, tortillaKilo: 0, refresco: 0, domicilio: '', notasEnvio: '', metodoPago: 'efectivo', telefono: '', nombreCliente: '' });
+    try {
+      if (orden.telefono && orden.telefono.length === 10 && orden.nombreCliente) {
+         await db.collection('clientes').doc(orden.telefono).set({
+            telefono: orden.telefono, nombre: orden.nombreCliente
+         }, { merge: true });
+      }
+      await db.collection('ventas').add(nuevaVenta);
+      await db.collection('config').doc('stock').set({ pollos: stockPollos - pollosOrden, refrescos: stockRefrescos - refrescosOrden }, { merge: true });
+      
+      setOrden({ entero: 0, mitad: 0, paquete15: 0, paquete2: 0, crujienteEntero: 0, crujienteMitad: 0, crujientePaq15: 0, crujientePaq2: 0, tortillaMedio: 0, tortillaKilo: 0, refresco: 0, domicilio: '', notasEnvio: '', metodoPago: 'efectivo', telefono: '', nombreCliente: '' });
+    } catch (error) {
+       setModalAlerta({ visible: true, mensaje: "Aún no se refrescan los permisos. Intenta en 1 minuto." });
+    }
   };
 
   const registrarGasto = async (e) => {
     e.preventDefault();
     const monto = parseFloat(nuevoGasto.monto);
     if (!nuevoGasto.descripcion || isNaN(monto) || monto <= 0) return setModalAlerta({ visible: true, mensaje: "Gasto inválido." });
-    if (user) await db.collection('gastos').add({ id: Date.now(), fechaDia: hoyStr, descripcion: nuevoGasto.descripcion, monto: monto });
+    await db.collection('gastos').add({ id: Date.now(), fechaDia: hoyStr, descripcion: nuevoGasto.descripcion, monto: monto });
     setNuevoGasto({ descripcion: '', monto: '' });
   };
 
@@ -292,7 +330,6 @@ function App() {
     setModalConfirmacion({
       visible: true, mensaje: `¿Eliminar permanentemente de tu base de datos?`,
       action: async () => {
-        if (!user) return;
         if (tipo === 'venta') {
           const v = ventas.find(v => v.id === idOriginal);
           if (v) {
@@ -794,62 +831,78 @@ function App() {
         )}
 
         {esPatron && vista === 'vip' && (
-          <div className="bg-white rounded-xl shadow-lg border-t-4 border-orange-500 overflow-hidden">
-             <div className="bg-gray-800 p-4 text-white">
-                <h3 className="font-black text-lg flex items-center gap-2"><Iconos.Star /> Bóveda de Fidelización: Clientes VIP</h3>
-                <p className="text-xs text-gray-400 mt-1">Análisis de lealtad basado en el número de pedidos a domicilio y volumen total de pollos.</p>
-             </div>
-             <div className="p-4 space-y-4 max-h-[600px] overflow-y-auto">
-                {clientesVIP.length === 0 ? (
-                  <p className="text-sm text-gray-500 italic text-center py-6">Aún no hay clientes registrados con número telefónico.</p>
-                ) : (
-                  clientesVIP.map((cliente, index) => {
-                    let colorFondo = "bg-gray-50 border-gray-200";
-                    let etiquetaStatus = "Cliente Nuevo";
-                    let colorBadge = "bg-red-100 text-red-800 border-red-200";
+          <div className="max-w-4xl mx-auto space-y-6">
+            <div className="bg-gray-900 rounded-xl shadow-lg border-t-4 border-blue-500 overflow-hidden text-white p-4 sm:p-6">
+              <h3 className="font-black text-lg flex items-center gap-2 mb-2"><Iconos.Users /> Importar Cliente a la Agenda (Sin Ventas)</h3>
+              <p className="text-xs text-gray-400 mb-4">Mete aquí los números de tu libreta vieja. Cuando el cajero teclee este número en un envío, el nombre aparecerá solo.</p>
+              
+              <form onSubmit={agregarClienteManual} className="flex flex-col sm:flex-row gap-3">
+                 <input type="text" placeholder="Teléfono a 10 dígitos..." value={nuevoClienteManual.telefono} onChange={(e) => setNuevoClienteManual({...nuevoClienteManual, telefono: e.target.value.replace(/\D/g, '').slice(0, 10)})} className="flex-1 p-3 rounded-lg font-bold text-gray-900 outline-none focus:ring-2 focus:ring-blue-500" />
+                 <input type="text" placeholder="Nombre completo..." value={nuevoClienteManual.nombre} onChange={(e) => setNuevoClienteManual({...nuevoClienteManual, nombre: e.target.value})} className="flex-1 p-3 rounded-lg font-bold text-gray-900 outline-none focus:ring-2 focus:ring-blue-500" />
+                 <button type="submit" className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg shadow-md transition-colors"><Iconos.PlusCircle /> Guardar Cliente</button>
+              </form>
+            </div>
 
-                    if (cliente.totalPedidos >= 3 && cliente.totalPedidos <= 6) {
-                      colorFondo = "bg-blue-50/50 border-blue-100";
-                      etiquetaStatus = "Cliente Frecuente";
-                      colorBadge = "bg-blue-100 text-blue-800 border-blue-200";
-                    } else if (cliente.totalPedidos >= 7) {
-                      colorFondo = "bg-green-50 border-green-200 ring-2 ring-green-600/20";
-                      etiquetaStatus = "👑 VIP MASTER";
-                      colorBadge = "bg-green-600 text-white font-black";
-                    }
+            <div className="bg-white rounded-xl shadow-lg border-t-4 border-orange-500 overflow-hidden">
+               <div className="bg-gray-800 p-4 text-white">
+                  <h3 className="font-black text-lg flex items-center gap-2"><Iconos.Star /> Bóveda de Fidelización: Clientes VIP</h3>
+                  <p className="text-xs text-gray-400 mt-1">Análisis de lealtad basado en el número de pedidos a domicilio y volumen total de pollos.</p>
+               </div>
+               <div className="p-4 space-y-4 max-h-[600px] overflow-y-auto">
+                  {clientesVIP.length === 0 ? (
+                    <p className="text-sm text-gray-500 italic text-center py-6">Aún no hay clientes registrados con número telefónico.</p>
+                  ) : (
+                    clientesVIP.map((cliente, index) => {
+                      let colorFondo = "bg-gray-50 border-gray-200";
+                      let etiquetaStatus = "Cliente Nuevo / Importado";
+                      let colorBadge = "bg-gray-200 text-gray-600 border-gray-300";
 
-                    return (
-                      <div key={cliente.telefono} className={`p-4 rounded-xl border flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 ${colorFondo}`}>
-                         <div className="space-y-1">
-                            <div className="flex items-center gap-3">
-                               <span className="font-black text-gray-400 text-sm">#{index + 1}</span>
-                               <h4 className="font-black text-base text-gray-900 uppercase">{cliente.nombre}</h4>
-                               <span className={`text-[10px] uppercase font-bold px-2.5 py-0.5 rounded-full border ${colorBadge}`}>{etiquetaStatus}</span>
-                            </div>
-                            <p className="text-sm font-mono text-gray-600 font-bold">📞 Teléfono: {cliente.telefono}</p>
-                            <div className="pt-1 flex flex-wrap gap-1 items-center">
-                               <span className="text-[10px] font-bold text-gray-400 uppercase mr-1">Fechas de compra:</span>
-                               {Array.from(cliente.fechas).map(f => (
-                                 <span key={f} className="text-[9px] font-bold bg-white border px-1.5 py-0.5 rounded text-gray-500 shadow-sm">{f}</span>
-                               ))}
-                            </div>
-                         </div>
-                         
-                         <div className="flex gap-4 w-full sm:w-auto border-t sm:border-t-0 pt-2 sm:pt-0 justify-between">
-                            <div className="text-center bg-white px-3 py-1.5 rounded-lg border shadow-sm">
-                               <span className="block text-[9px] font-black text-gray-400 uppercase tracking-wider">Pedidos</span>
-                               <span className="text-xl font-black text-gray-800">{cliente.totalPedidos}</span>
-                            </div>
-                            <div className="text-center bg-white px-3 py-1.5 rounded-lg border shadow-sm">
-                               <span className="block text-[9px] font-black text-gray-400 uppercase tracking-wider">Pollos</span>
-                               <span className="text-xl font-black text-orange-600">{cliente.totalPollos} kg</span>
-                            </div>
-                         </div>
-                      </div>
-                    );
-                  })
-                )}
-             </div>
+                      if (cliente.totalPedidos > 0 && cliente.totalPedidos <= 2) {
+                        colorBadge = "bg-red-100 text-red-800 border-red-200";
+                        etiquetaStatus = "Cliente Ocasional";
+                      } else if (cliente.totalPedidos >= 3 && cliente.totalPedidos <= 6) {
+                        colorFondo = "bg-blue-50/50 border-blue-100";
+                        etiquetaStatus = "Cliente Frecuente";
+                        colorBadge = "bg-blue-100 text-blue-800 border-blue-200";
+                      } else if (cliente.totalPedidos >= 7) {
+                        colorFondo = "bg-green-50 border-green-200 ring-2 ring-green-600/20";
+                        etiquetaStatus = "👑 VIP MASTER";
+                        colorBadge = "bg-green-600 text-white font-black";
+                      }
+
+                      return (
+                        <div key={cliente.telefono} className={`p-4 rounded-xl border flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 ${colorFondo}`}>
+                           <div className="space-y-1">
+                              <div className="flex items-center gap-3">
+                                 <span className="font-black text-gray-400 text-sm">#{index + 1}</span>
+                                 <h4 className="font-black text-base text-gray-900 uppercase">{cliente.nombre}</h4>
+                                 <span className={`text-[10px] uppercase font-bold px-2.5 py-0.5 rounded-full border ${colorBadge}`}>{etiquetaStatus}</span>
+                              </div>
+                              <p className="text-sm font-mono text-gray-600 font-bold">📞 Teléfono: {cliente.telefono}</p>
+                              <div className="pt-1 flex flex-wrap gap-1 items-center">
+                                 <span className="text-[10px] font-bold text-gray-400 uppercase mr-1">Fechas de compra:</span>
+                                 {Array.from(cliente.fechas).length === 0 ? <span className="text-[9px] text-gray-400 italic">Solo en agenda</span> : Array.from(cliente.fechas).map(f => (
+                                   <span key={f} className="text-[9px] font-bold bg-white border px-1.5 py-0.5 rounded text-gray-500 shadow-sm">{f}</span>
+                                 ))}
+                              </div>
+                           </div>
+                           
+                           <div className="flex gap-4 w-full sm:w-auto border-t sm:border-t-0 pt-2 sm:pt-0 justify-between">
+                              <div className="text-center bg-white px-3 py-1.5 rounded-lg border shadow-sm">
+                                 <span className="block text-[9px] font-black text-gray-400 uppercase tracking-wider">Pedidos</span>
+                                 <span className="text-xl font-black text-gray-800">{cliente.totalPedidos}</span>
+                              </div>
+                              <div className="text-center bg-white px-3 py-1.5 rounded-lg border shadow-sm">
+                                 <span className="block text-[9px] font-black text-gray-400 uppercase tracking-wider">Pollos</span>
+                                 <span className="text-xl font-black text-orange-600">{cliente.totalPollos} kg</span>
+                              </div>
+                           </div>
+                        </div>
+                      );
+                    })
+                  )}
+               </div>
+            </div>
           </div>
         )}
 
