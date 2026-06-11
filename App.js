@@ -8,12 +8,12 @@ const Iconos = {
   Calculator: () => <span>🧮</span>, CalendarDays: () => <span>📅</span>, Banknote: () => <span>💵</span>,
   CreditCard: () => <span>💳</span>, PlusCircle: () => <span>➕</span>, ListOrdered: () => <span>📋</span>,
   Trash2: () => <span>🗑️</span>, Download: () => <span>📥</span>, TrendingUp: () => <span>📈</span>,
-  Star: () => <span>⭐</span>
+  Star: () => <span>⭐</span>, Users: () => <span>👥</span>
 };
 
-// 3. Conexión Firebase (El Chilpayin) - LLAVE CONFIRMADA
+// 3. Conexión Firebase (El Chilpayin)
 const firebaseConfig = {
-  apiKey: "AIzaSyB_CBmUwgFviyffpFpJ08n_WCflBIXZVaw",
+  apiKey: "PEGAR_AQUI_TU_NUEVA_LLAVE",
   authDomain: "chilpayin-4158c.firebaseapp.com",
   projectId: "chilpayin-4158c",
   storageBucket: "chilpayin-4158c.firebasestorage.app",
@@ -75,6 +75,10 @@ function App() {
   const [mermaPollo, setMermaPollo] = useState('');
   const [mermaRefresco, setMermaRefresco] = useState('');
   
+  // NUEVO: Agenda manual de clientes
+  const [nuevoClienteManual, setNuevoClienteManual] = useState({ telefono: '', nombre: '' });
+  const [clientesAgenda, setClientesAgenda] = useState([]);
+
   const [tortillaProv, setTortillaProv] = useState({ dejo: 0, regreso: 0 });
   const [entradasHoy, setEntradasHoy] = useState({ pollos: 0, refrescos: 0 });
   const [costoPolloUnidad, setCostoPolloUnidad] = useState(72); 
@@ -107,6 +111,12 @@ function App() {
       setGastos(g.sort((a, b) => b.id - a.id));
     });
 
+    // Leer la agenda manual
+    const unsubClientes = db.collection('clientes').onSnapshot((snap) => {
+      const c = snap.docs.map(d => d.data());
+      setClientesAgenda(c);
+    });
+
     const unsubStock = db.collection('config').doc('stock').onSnapshot((docSnap) => {
       if (docSnap.exists) {
         setStockPollos(docSnap.data().pollos || 0);
@@ -134,7 +144,7 @@ function App() {
       if (doc.exists) setEntradasHoy(doc.data());
     });
 
-    return () => { unsubVentas(); unsubGastos(); unsubStock(); unsubCostos(); unsubTortilla(); unsubHistorialTortillas(); unsubEntradas(); };
+    return () => { unsubVentas(); unsubGastos(); unsubClientes(); unsubStock(); unsubCostos(); unsubTortilla(); unsubHistorialTortillas(); unsubEntradas(); };
   }, [user]);
 
   const ventasHoy = ventas.filter(v => v.fechaDia === hoyStr);
@@ -150,6 +160,7 @@ function App() {
 
   const cerrarSesionPatron = () => { setEsPatron(false); setVista('local'); };
 
+  // INTELIGENCIA DE AUTOCOMPLETADO
   const handleOrdenChange = (e) => {
     const { name, value } = e.target;
     if (name === 'notasEnvio' || name === 'metodoPago' || name === 'nombreCliente') {
@@ -159,10 +170,17 @@ function App() {
       setOrden(prev => {
         const updated = { ...prev, telefono: numClean };
         if (numClean.length === 10) {
-          const historialCliente = ventas.find(v => v.telefono === numClean);
-          if (historialCliente) {
-            updated.nombreCliente = historialCliente.nombreCliente || '';
-            updated.notasEnvio = historialCliente.notasEnvio || '';
+          // 1. Buscar primero en la Agenda Manual
+          const clienteAgenda = clientesAgenda.find(c => c.telefono === numClean);
+          if (clienteAgenda) {
+            updated.nombreCliente = clienteAgenda.nombre;
+          } else {
+            // 2. Si no está en la agenda, buscar en el historial de ventas
+            const historialCliente = ventas.find(v => v.telefono === numClean);
+            if (historialCliente) {
+              updated.nombreCliente = historialCliente.nombreCliente || '';
+              updated.notasEnvio = historialCliente.notasEnvio || '';
+            }
           }
         }
         return updated;
@@ -172,8 +190,40 @@ function App() {
     }
   };
 
+  // REGISTRAR CLIENTE DESDE LA LIBRETA
+  const agregarClienteManual = async (e) => {
+    e.preventDefault();
+    const tel = nuevoClienteManual.telefono.replace(/\D/g, '');
+    if (tel.length !== 10 || !nuevoClienteManual.nombre) {
+      return setModalAlerta({ visible: true, mensaje: "Ingresa 10 dígitos y el nombre." });
+    }
+    if (user) {
+      await db.collection('clientes').doc(tel).set({
+        telefono: tel,
+        nombre: nuevoClienteManual.nombre,
+        agregadoManual: true
+      }, { merge: true });
+      setNuevoClienteManual({ telefono: '', nombre: '' });
+      setModalAlerta({ visible: true, mensaje: "¡Cliente guardado en la agenda!" });
+    }
+  };
+
+  // CONSTRUCCIÓN DE LA TABLA VIP (Fusiona ventas y agenda)
   const clientesVIP = useMemo(() => {
     const mapa = {};
+    
+    // Primero, metemos a los que agregaste manualmente a la libreta
+    clientesAgenda.forEach(c => {
+      mapa[c.telefono] = {
+        telefono: c.telefono,
+        nombre: c.nombre,
+        totalPollos: 0,
+        totalPedidos: 0,
+        fechas: new Set()
+      };
+    });
+
+    // Luego, procesamos todas las ventas para sumarles pollos y pedidos
     ventas.forEach(v => {
       if (v.telefono && typeof v.telefono === 'string' && v.telefono.length === 10) {
         if (!mapa[v.telefono]) {
@@ -188,13 +238,15 @@ function App() {
         mapa[v.telefono].totalPollos += v.pollosTotales || 0;
         mapa[v.telefono].totalPedidos += 1;
         mapa[v.telefono].fechas.add(v.fechaDia);
+        // Actualizar nombre si en una venta pusieron uno mejor
         if (v.nombreCliente && v.nombreCliente !== 'Cliente Sin Nombre') {
           mapa[v.telefono].nombre = v.nombreCliente; 
         }
       }
     });
+
     return Object.values(mapa).sort((a, b) => b.totalPollos - a.totalPollos);
-  }, [ventas]);
+  }, [ventas, clientesAgenda]);
 
   const agregarStockPollo = async (e) => {
     e.preventDefault();
@@ -272,6 +324,13 @@ function App() {
       total: totalOrden, pollosTotales: pollosOrden, refrescosTotales: refrescosOrden, metodoPago: orden.metodoPago,
       telefono: orden.telefono || '', nombreCliente: orden.nombreCliente || '', notasEnvio: orden.notasEnvio || ''
     };
+
+    // Si pusieron nombre nuevo al cliente, lo actualizamos también en la Agenda invisible
+    if (orden.telefono && orden.telefono.length === 10 && orden.nombreCliente) {
+       await db.collection('clientes').doc(orden.telefono).set({
+          telefono: orden.telefono, nombre: orden.nombreCliente
+       }, { merge: true });
+    }
 
     await db.collection('ventas').add(nuevaVenta);
     await db.collection('config').doc('stock').set({ pollos: stockPollos - pollosOrden, refrescos: stockRefrescos - refrescosOrden }, { merge: true });
@@ -794,62 +853,79 @@ function App() {
         )}
 
         {esPatron && vista === 'vip' && (
-          <div className="bg-white rounded-xl shadow-lg border-t-4 border-orange-500 overflow-hidden">
-             <div className="bg-gray-800 p-4 text-white">
-                <h3 className="font-black text-lg flex items-center gap-2"><Iconos.Star /> Bóveda de Fidelización: Clientes VIP</h3>
-                <p className="text-xs text-gray-400 mt-1">Análisis de lealtad basado en el número de pedidos a domicilio y volumen total de pollos.</p>
-             </div>
-             <div className="p-4 space-y-4 max-h-[600px] overflow-y-auto">
-                {clientesVIP.length === 0 ? (
-                  <p className="text-sm text-gray-500 italic text-center py-6">Aún no hay clientes registrados con número telefónico.</p>
-                ) : (
-                  clientesVIP.map((cliente, index) => {
-                    let colorFondo = "bg-gray-50 border-gray-200";
-                    let etiquetaStatus = "Cliente Nuevo";
-                    let colorBadge = "bg-red-100 text-red-800 border-red-200";
+          <div className="max-w-4xl mx-auto space-y-6">
+            {/* NUEVO: PANEL DE IMPORTACIÓN MANUAL */}
+            <div className="bg-gray-900 rounded-xl shadow-lg border-t-4 border-blue-500 overflow-hidden text-white p-4 sm:p-6">
+              <h3 className="font-black text-lg flex items-center gap-2 mb-2"><Iconos.Users /> Importar Cliente a la Agenda (Sin Ventas)</h3>
+              <p className="text-xs text-gray-400 mb-4">Mete aquí los números de tu libreta vieja. Cuando el cajero teclee este número en un envío, el nombre aparecerá solo.</p>
+              
+              <form onSubmit={agregarClienteManual} className="flex flex-col sm:flex-row gap-3">
+                 <input type="text" placeholder="Teléfono a 10 dígitos..." value={nuevoClienteManual.telefono} onChange={(e) => setNuevoClienteManual({...nuevoClienteManual, telefono: e.target.value.replace(/\D/g, '').slice(0, 10)})} className="flex-1 p-3 rounded-lg font-bold text-gray-900 outline-none focus:ring-2 focus:ring-blue-500" />
+                 <input type="text" placeholder="Nombre completo..." value={nuevoClienteManual.nombre} onChange={(e) => setNuevoClienteManual({...nuevoClienteManual, nombre: e.target.value})} className="flex-1 p-3 rounded-lg font-bold text-gray-900 outline-none focus:ring-2 focus:ring-blue-500" />
+                 <button type="submit" className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg shadow-md transition-colors"><Iconos.PlusCircle /> Guardar Cliente</button>
+              </form>
+            </div>
 
-                    if (cliente.totalPedidos >= 3 && cliente.totalPedidos <= 6) {
-                      colorFondo = "bg-blue-50/50 border-blue-100";
-                      etiquetaStatus = "Cliente Frecuente";
-                      colorBadge = "bg-blue-100 text-blue-800 border-blue-200";
-                    } else if (cliente.totalPedidos >= 7) {
-                      colorFondo = "bg-green-50 border-green-200 ring-2 ring-green-600/20";
-                      etiquetaStatus = "👑 VIP MASTER";
-                      colorBadge = "bg-green-600 text-white font-black";
-                    }
+            <div className="bg-white rounded-xl shadow-lg border-t-4 border-orange-500 overflow-hidden">
+               <div className="bg-gray-800 p-4 text-white">
+                  <h3 className="font-black text-lg flex items-center gap-2"><Iconos.Star /> Bóveda de Fidelización: Clientes VIP</h3>
+                  <p className="text-xs text-gray-400 mt-1">Análisis de lealtad basado en el número de pedidos a domicilio y volumen total de pollos.</p>
+               </div>
+               <div className="p-4 space-y-4 max-h-[600px] overflow-y-auto">
+                  {clientesVIP.length === 0 ? (
+                    <p className="text-sm text-gray-500 italic text-center py-6">Aún no hay clientes registrados con número telefónico.</p>
+                  ) : (
+                    clientesVIP.map((cliente, index) => {
+                      let colorFondo = "bg-gray-50 border-gray-200";
+                      let etiquetaStatus = "Cliente Nuevo / Importado";
+                      let colorBadge = "bg-gray-200 text-gray-600 border-gray-300";
 
-                    return (
-                      <div key={cliente.telefono} className={`p-4 rounded-xl border flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 ${colorFondo}`}>
-                         <div className="space-y-1">
-                            <div className="flex items-center gap-3">
-                               <span className="font-black text-gray-400 text-sm">#{index + 1}</span>
-                               <h4 className="font-black text-base text-gray-900 uppercase">{cliente.nombre}</h4>
-                               <span className={`text-[10px] uppercase font-bold px-2.5 py-0.5 rounded-full border ${colorBadge}`}>{etiquetaStatus}</span>
-                            </div>
-                            <p className="text-sm font-mono text-gray-600 font-bold">📞 Teléfono: {cliente.telefono}</p>
-                            <div className="pt-1 flex flex-wrap gap-1 items-center">
-                               <span className="text-[10px] font-bold text-gray-400 uppercase mr-1">Fechas de compra:</span>
-                               {Array.from(cliente.fechas).map(f => (
-                                 <span key={f} className="text-[9px] font-bold bg-white border px-1.5 py-0.5 rounded text-gray-500 shadow-sm">{f}</span>
-                               ))}
-                            </div>
-                         </div>
-                         
-                         <div className="flex gap-4 w-full sm:w-auto border-t sm:border-t-0 pt-2 sm:pt-0 justify-between">
-                            <div className="text-center bg-white px-3 py-1.5 rounded-lg border shadow-sm">
-                               <span className="block text-[9px] font-black text-gray-400 uppercase tracking-wider">Pedidos</span>
-                               <span className="text-xl font-black text-gray-800">{cliente.totalPedidos}</span>
-                            </div>
-                            <div className="text-center bg-white px-3 py-1.5 rounded-lg border shadow-sm">
-                               <span className="block text-[9px] font-black text-gray-400 uppercase tracking-wider">Pollos</span>
-                               <span className="text-xl font-black text-orange-600">{cliente.totalPollos} kg</span>
-                            </div>
-                         </div>
-                      </div>
-                    );
-                  })
-                )}
-             </div>
+                      if (cliente.totalPedidos > 0 && cliente.totalPedidos <= 2) {
+                        colorBadge = "bg-red-100 text-red-800 border-red-200";
+                        etiquetaStatus = "Cliente Ocasional";
+                      } else if (cliente.totalPedidos >= 3 && cliente.totalPedidos <= 6) {
+                        colorFondo = "bg-blue-50/50 border-blue-100";
+                        etiquetaStatus = "Cliente Frecuente";
+                        colorBadge = "bg-blue-100 text-blue-800 border-blue-200";
+                      } else if (cliente.totalPedidos >= 7) {
+                        colorFondo = "bg-green-50 border-green-200 ring-2 ring-green-600/20";
+                        etiquetaStatus = "👑 VIP MASTER";
+                        colorBadge = "bg-green-600 text-white font-black";
+                      }
+
+                      return (
+                        <div key={cliente.telefono} className={`p-4 rounded-xl border flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 ${colorFondo}`}>
+                           <div className="space-y-1">
+                              <div className="flex items-center gap-3">
+                                 <span className="font-black text-gray-400 text-sm">#{index + 1}</span>
+                                 <h4 className="font-black text-base text-gray-900 uppercase">{cliente.nombre}</h4>
+                                 <span className={`text-[10px] uppercase font-bold px-2.5 py-0.5 rounded-full border ${colorBadge}`}>{etiquetaStatus}</span>
+                              </div>
+                              <p className="text-sm font-mono text-gray-600 font-bold">📞 Teléfono: {cliente.telefono}</p>
+                              <div className="pt-1 flex flex-wrap gap-1 items-center">
+                                 <span className="text-[10px] font-bold text-gray-400 uppercase mr-1">Fechas de compra:</span>
+                                 {Array.from(cliente.fechas).length === 0 ? <span className="text-[9px] text-gray-400 italic">Solo en agenda</span> : Array.from(cliente.fechas).map(f => (
+                                   <span key={f} className="text-[9px] font-bold bg-white border px-1.5 py-0.5 rounded text-gray-500 shadow-sm">{f}</span>
+                                 ))}
+                              </div>
+                           </div>
+                           
+                           <div className="flex gap-4 w-full sm:w-auto border-t sm:border-t-0 pt-2 sm:pt-0 justify-between">
+                              <div className="text-center bg-white px-3 py-1.5 rounded-lg border shadow-sm">
+                                 <span className="block text-[9px] font-black text-gray-400 uppercase tracking-wider">Pedidos</span>
+                                 <span className="text-xl font-black text-gray-800">{cliente.totalPedidos}</span>
+                              </div>
+                              <div className="text-center bg-white px-3 py-1.5 rounded-lg border shadow-sm">
+                                 <span className="block text-[9px] font-black text-gray-400 uppercase tracking-wider">Pollos</span>
+                                 <span className="text-xl font-black text-orange-600">{cliente.totalPollos} kg</span>
+                              </div>
+                           </div>
+                        </div>
+                      );
+                    })
+                  )}
+               </div>
+            </div>
           </div>
         )}
 
