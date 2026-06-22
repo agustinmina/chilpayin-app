@@ -74,7 +74,7 @@ function App() {
   const [mermaPollo, setMermaPollo] = useState('');
   const [mermaRefresco, setMermaRefresco] = useState('');
   
-  const [nuevoClienteManual, setNuevoClienteManual] = useState({ telephone: '', nombre: '' });
+  const [nuevoClienteManual, setNuevoClienteManual] = useState({ telefono: '', nombre: '' });
   const [clientesAgenda, setClientesAgenda] = useState([]);
 
   const [tortillaProv, setTortillaProv] = useState({ dejo: 0, regreso: 0 });
@@ -230,12 +230,13 @@ function App() {
     return Object.values(mapa).sort((a, b) => b.totalPollos - a.totalPollos);
   }, [ventas, clientesAgenda]);
 
+  // OPERACIONES ATÓMICAS BLINDADAS PARA EL STOCK
   const agregarStockPollo = async (e) => {
     e.preventDefault();
     const cantidad = parseFloat(ingresoPollo);
     if (isNaN(cantidad) || cantidad <= 0) return setModalAlerta({ visible: true, mensaje: "Ingresa cantidad válida." });
-    await db.collection('config').doc('stock').set({ pollos: stockPollos + cantidad }, { merge: true });
-    await db.collection('entradas_diarias').doc(hoyStr.replace(/\//g, '-')).set({ pollos: (entradasHoy.pollos || 0) + cantidad }, { merge: true });
+    await db.collection('config').doc('stock').set({ pollos: firebase.firestore.FieldValue.increment(cantidad) }, { merge: true });
+    await db.collection('entradas_diarias').doc(hoyStr.replace(/\//g, '-')).set({ pollos: firebase.firestore.FieldValue.increment(cantidad) }, { merge: true });
     setIngresoPollo('');
   };
 
@@ -243,7 +244,7 @@ function App() {
     e.preventDefault();
     const cantidad = parseFloat(mermaPollo);
     if (isNaN(cantidad) || cantidad <= 0) return setModalAlerta({ visible: true, mensaje: "Ingresa cantidad válida." });
-    await db.collection('config').doc('stock').set({ pollos: stockPollos - cantidad }, { merge: true });
+    await db.collection('config').doc('stock').set({ pollos: firebase.firestore.FieldValue.increment(-cantidad) }, { merge: true });
     setMermaPollo('');
   };
 
@@ -251,8 +252,8 @@ function App() {
     e.preventDefault();
     const cantidad = parseInt(ingresoRefresco);
     if (isNaN(cantidad) || cantidad <= 0) return setModalAlerta({ visible: true, mensaje: "Ingresa cantidad válida." });
-    await db.collection('config').doc('stock').set({ refrescos: stockRefrescos + cantidad }, { merge: true });
-    await db.collection('entradas_diarias').doc(hoyStr.replace(/\//g, '-')).set({ refrescos: (entradasHoy.refrescos || 0) + cantidad }, { merge: true });
+    await db.collection('config').doc('stock').set({ refrescos: firebase.firestore.FieldValue.increment(cantidad) }, { merge: true });
+    await db.collection('entradas_diarias').doc(hoyStr.replace(/\//g, '-')).set({ refrescos: firebase.firestore.FieldValue.increment(cantidad) }, { merge: true });
     setIngresoRefresco('');
   };
 
@@ -260,7 +261,7 @@ function App() {
     e.preventDefault();
     const cantidad = parseInt(mermaRefresco);
     if (isNaN(cantidad) || cantidad <= 0) return setModalAlerta({ visible: true, mensaje: "Ingresa cantidad válida." });
-    await db.collection('config').doc('stock').set({ refrescos: stockRefrescos - quantity }, { merge: true });
+    await db.collection('config').doc('stock').set({ refrescos: firebase.firestore.FieldValue.increment(-cantidad) }, { merge: true });
     setMermaRefresco('');
   };
 
@@ -309,7 +310,13 @@ function App() {
          }, { merge: true });
       }
       await db.collection('ventas').add(nuevaVenta);
-      await db.collection('config').doc('stock').set({ pollos: stockPollos - pollosOrden, refrescos: stockRefrescos - refrescosOrden }, { merge: true });
+      
+      // RESTA ATÓMICA BLINDADA: No importa el lag de red, Firebase calcula la resta exacta en su servidor
+      await db.collection('config').doc('stock').set({ 
+        pollos: firebase.firestore.FieldValue.increment(-pollosOrden), 
+        refrescos: firebase.firestore.FieldValue.increment(-refrescosOrden) 
+      }, { merge: true });
+
       setOrden({ entero: 0, mitad: 0, paquete15: 0, paquete2: 0, mixto: 0, crujienteEntero: 0, crujienteMitad: 0, crujientePaq15: 0, crujientePaq2: 0, tortillaMedio: 0, tortillaKilo: 0, refresco: 0, domicilio: '', notasEnvio: '', metodoPago: 'efectivo', telefono: '', nombreCliente: '' });
     } catch (error) {
        setModalAlerta({ visible: true, mensaje: "Error al registrar la venta en la base de datos." });
@@ -333,7 +340,11 @@ function App() {
           const v = ventas.find(v => v.id === idOriginal);
           if (v) {
             await db.collection('ventas').doc(dbId).delete();
-            await db.collection('config').doc('stock').set({ pollos: stockPollos + (v.pollosTotales || 0), refrescos: stockRefrescos + (v.refrescosTotales || 0) }, { merge: true });
+            // DEVOLUCIÓN ATÓMICA AL ELIMINAR TICKET
+            await db.collection('config').doc('stock').set({ 
+              pollos: firebase.firestore.FieldValue.increment(v.pollosTotales || 0), 
+              refrescos: firebase.firestore.FieldValue.increment(v.refrescosTotales || 0) 
+            }, { merge: true });
           }
         }
         if (tipo === 'gasto') await db.collection('gastos').doc(dbId).delete();
@@ -743,7 +754,7 @@ function App() {
                       <button type="submit" className="bg-blue-600 text-white px-4 rounded font-bold">Sumar</button>
                     </form>
                     <form onSubmit={restarMermaRefresco} className="flex gap-2 mt-1">
-                      <input type="number" step="0.5" placeholder="Restar Mermas (-)" value={mermaRefresco} onChange={(e) => setMermaRefresco(e.target.value)} className="flex-1 border border-red-300 p-2 rounded text-center font-bold outline-none text-red-600 focus:border-red-500" />
+                      <input type="number" placeholder="Restar Mermas (-)" value={mermaRefresco} onChange={(e) => setMermaRefresco(e.target.value)} className="flex-1 border border-red-300 p-2 rounded text-center font-bold outline-none text-red-600 focus:border-red-500" />
                       <button type="submit" className="bg-red-600 text-white px-4 rounded font-bold">Restar</button>
                     </form>
                     <div className="flex justify-between text-blue-800 font-bold text-xs mt-2 opacity-80">
@@ -815,7 +826,7 @@ function App() {
 
               <div className="space-y-2 text-sm font-bold text-gray-700 bg-gray-50 p-4 rounded-lg border">
                 <div className="flex justify-between pb-2 border-b"><span>(+) Ingresos Netos de Hoy:</span> <span className="text-green-600">${ventasNetasReales.toFixed(2)}</span></div>
-                <div className="flex justify-between pt-2"><span>(-) Costo de Production:</span> <span className="text-red-600">-${costoTotalProduccion.toFixed(2)}</span></div>
+                <div className="flex justify-between pt-2"><span>(-) Costo de Producción:</span> <span className="text-red-600">-${costoTotalProduccion.toFixed(2)}</span></div>
                 <div className="flex justify-between"><span>(-) Costo de Tortillas:</span> <span className="text-red-600">-${pTortillaProveedor.toFixed(2)}</span></div>
                 <div className="flex justify-between"><span>(-) Pago Envíos Totales:</span> <span className="text-red-600">-${(resHoy.costoEnvioEfectivo + resHoy.costoEnvioTransferencia).toFixed(2)}</span></div>
                 <div className="flex justify-between"><span>(-) Otros Gastos Físicos del Local:</span> <span className="text-red-600">-${resHoy.totalGastos.toFixed(2)}</span></div>
@@ -842,7 +853,7 @@ function App() {
               <p className="text-xs text-gray-400 mb-4">Mete aquí los números de tu libreta vieja. Cuando el cajero teclee este número en un envío, el nombre aparecerá solo.</p>
               
               <form onSubmit={agregarClienteManual} className="flex flex-col sm:flex-row gap-3">
-                 <input type="text" placeholder="Teléfono a 10 dígitos..." value={nuevoClienteManual.telefono} onChange={(e) => setNuevoClienteManual({...nuevoClienteManual, telephone: e.target.value.replace(/\D/g, '').slice(0, 10)})} className="flex-1 p-3 rounded-lg font-bold text-gray-900 outline-none focus:ring-2 focus:ring-blue-500" />
+                 <input type="text" placeholder="Teléfono a 10 dígitos..." value={nuevoClienteManual.telefono} onChange={(e) => setNuevoClienteManual({...nuevoClienteManual, telefono: e.target.value.replace(/\D/g, '').slice(0, 10)})} className="flex-1 p-3 rounded-lg font-bold text-gray-900 outline-none focus:ring-2 focus:ring-blue-500" />
                  <input type="text" placeholder="Nombre completo..." value={nuevoClienteManual.nombre} onChange={(e) => setNuevoClienteManual({...nuevoClienteManual, nombre: e.target.value})} className="flex-1 p-3 rounded-lg font-bold text-gray-900 outline-none focus:ring-2 focus:ring-blue-500" />
                  <button type="submit" className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg shadow-md transition-colors"><Iconos.PlusCircle /> Guardar Cliente</button>
               </form>
