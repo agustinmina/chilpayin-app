@@ -8,7 +8,7 @@ const Iconos = {
   Calculator: () => <span>🧮</span>, CalendarDays: () => <span>📅</span>, Banknote: () => <span>💵</span>,
   CreditCard: () => <span>💳</span>, PlusCircle: () => <span>➕</span>, ListOrdered: () => <span>📋</span>,
   Trash2: () => <span>🗑️</span>, Download: () => <span>📥</span>, TrendingUp: () => <span>📈</span>,
-  Star: () => <span>⭐</span>, Users: () => <span>👥</span>
+  Star: () => <span>⭐</span>, Users: () => <span>👥</span>, Search: () => <span>🔍</span>
 };
 
 // 3. Conexión Firebase (El Chilpayin)
@@ -26,13 +26,13 @@ if (!firebase.apps.length) {
 }
 const db = firebase.firestore();
 
-// 4. Precios y equivalencias
+// 4. Precios y equivalencias ACTUALIZADOS
 const PRECIOS = { 
-  entero: 150, mitad: 80, paquete15: 245, paquete2: 310, 
-  mixto: 150,
+  entero: 150, mitad: 80, paquete15: 245, paquete2: 315, // Actualizado a 315
+  mixto: 150, paqueteFamiliar: 290, // Nuevas especialidades
   tortillaMedio: 12, tortillaKilo: 24, refresco: 30 
 };
-const EQUIVALENCIA_POLLOS = { entero: 1, mitad: 0.5, paquete15: 1.5, paquete2: 2, mixto: 1 };
+const EQUIVALENCIA_POLLOS = { entero: 1, mitad: 0.5, paquete15: 1.5, paquete2: 2, mixto: 1, paqueteFamiliar: 1.5 };
 const PIN_PATRON = "1234";
 
 // 5. Componente de diseño
@@ -61,13 +61,17 @@ function App() {
   const [inputPin, setInputPin] = useState('');
 
   const [orden, setOrden] = useState({ 
-    entero: 0, mitad: 0, paquete15: 0, paquete2: 0, mixto: 0,
+    entero: 0, mitad: 0, paquete15: 0, paquete2: 0, mixto: 0, paqueteFamiliar: 0,
     crujienteEntero: 0, crujienteMitad: 0, crujientePaq15: 0, crujientePaq2: 0,
     tortillaMedio: 0, tortillaKilo: 0, refresco: 0, 
     domicilio: '', notasEnvio: '', metodoPago: 'efectivo',
     telefono: '', nombreCliente: ''
   });
   
+  // Estados para autocompletado de clientes
+  const [busquedaTelefonos, setBusquedaTelefonos] = useState([]);
+  const [mostrarSugerencias, setMostrarSugerencias] = useState(false);
+
   const [nuevoGasto, setNuevoGasto] = useState({ descripcion: '', monto: '' });
   const [ingresoPollo, setIngresoPollo] = useState('');
   const [ingresoRefresco, setIngresoRefresco] = useState('');
@@ -149,52 +153,6 @@ function App() {
 
   const cerrarSesionPatron = () => { setEsPatron(false); setVista('local'); };
 
-  const handleOrdenChange = (e) => {
-    const { name, value } = e.target;
-    if (name === 'notasEnvio' || name === 'metodoPago' || name === 'nombreCliente') {
-      setOrden(prev => ({ ...prev, [name]: value }));
-    } else if (name === 'telefono') {
-      const numClean = value.replace(/\D/g, '').slice(0, 10);
-      setOrden(prev => {
-        const updated = { ...prev, telefono: numClean };
-        if (numClean.length === 10) {
-          const clienteAgenda = clientesAgenda.find(c => c.telefono === numClean);
-          if (clienteAgenda) {
-            updated.nombreCliente = clienteAgenda.nombre;
-          } else {
-            const historialCliente = ventas.find(v => v.telefono === numClean);
-            if (historialCliente) {
-              updated.nombreCliente = historialCliente.nombreCliente || '';
-              updated.notasEnvio = historialCliente.notasEnvio || '';
-            }
-          }
-        }
-        return updated;
-      });
-    } else {
-      setOrden(prev => ({ ...prev, [name]: value === '' ? 0 : Math.max(0, parseInt(value) || 0) }));
-    }
-  };
-
-  const agregarClienteManual = async (e) => {
-    e.preventDefault();
-    const tel = nuevoClienteManual.telefono.replace(/\D/g, '');
-    if (tel.length !== 10 || !nuevoClienteManual.nombre) {
-      return setModalAlerta({ visible: true, mensaje: "Ingresa 10 dígitos y el nombre." });
-    }
-    try {
-      await db.collection('clientes').doc(tel).set({
-        telefono: tel,
-        nombre: nuevoClienteManual.nombre,
-        agregadoManual: true
-      }, { merge: true });
-      setNuevoClienteManual({ telefono: '', nombre: '' });
-      setModalAlerta({ visible: true, mensaje: "¡Cliente guardado con éxito!" });
-    } catch (error) {
-      setModalAlerta({ visible: true, mensaje: "Error al guardar. Revisa conexión." });
-    }
-  };
-
   const clientesVIP = useMemo(() => {
     const mapa = {};
     clientesAgenda.forEach(c => {
@@ -229,6 +187,62 @@ function App() {
 
     return Object.values(mapa).sort((a, b) => b.totalPollos - a.totalPollos);
   }, [ventas, clientesAgenda]);
+
+  const handleOrdenChange = (e) => {
+    const { name, value } = e.target;
+    if (name === 'notasEnvio' || name === 'metodoPago' || name === 'nombreCliente') {
+      setOrden(prev => ({ ...prev, [name]: value }));
+    } else if (name !== 'telefono') {
+      setOrden(prev => ({ ...prev, [name]: value === '' ? 0 : Math.max(0, parseInt(value) || 0) }));
+    }
+  };
+
+  // Motor de Búsqueda Predictiva VIP
+  const handleTelefonoChange = (e) => {
+    const valor = e.target.value.replace(/\D/g, '').slice(0, 10);
+    setOrden(prev => ({ ...prev, telefono: valor }));
+
+    if (valor.length > 2) {
+      const coincidencias = [];
+      const vistos = new Set();
+      
+      clientesVIP.forEach(c => {
+        if (c.telefono.includes(valor) && !vistos.has(c.telefono)) {
+          coincidencias.push({ telefono: c.telefono, nombre: c.nombre });
+          vistos.add(c.telefono);
+        }
+      });
+      
+      setBusquedaTelefonos(coincidencias.slice(0, 5));
+      setMostrarSugerencias(true);
+    } else {
+      setMostrarSugerencias(false);
+    }
+  };
+
+  const seleccionarClientePredictivo = (cliente) => {
+    setOrden(prev => ({ ...prev, telefono: cliente.telefono, nombreCliente: cliente.nombre }));
+    setMostrarSugerencias(false);
+  };
+
+  const agregarClienteManual = async (e) => {
+    e.preventDefault();
+    const tel = nuevoClienteManual.telefono.replace(/\D/g, '');
+    if (tel.length !== 10 || !nuevoClienteManual.nombre) {
+      return setModalAlerta({ visible: true, mensaje: "Ingresa 10 dígitos y el nombre." });
+    }
+    try {
+      await db.collection('clientes').doc(tel).set({
+        telefono: tel,
+        nombre: nuevoClienteManual.nombre,
+        agregadoManual: true
+      }, { merge: true });
+      setNuevoClienteManual({ telefono: '', nombre: '' });
+      setModalAlerta({ visible: true, mensaje: "¡Cliente guardado con éxito!" });
+    } catch (error) {
+      setModalAlerta({ visible: true, mensaje: "Error al guardar. Revisa conexión." });
+    }
+  };
 
   // OPERACIONES ATÓMICAS BLINDADAS PARA EL STOCK
   const agregarStockPollo = async (e) => {
@@ -279,15 +293,15 @@ function App() {
     }
   };
 
-  const subtotalPollo = (orden.entero || 0) * PRECIOS.entero + (orden.mitad || 0) * PRECIOS.mitad + (orden.paquete15 || 0) * PRECIOS.paquete15 + (orden.paquete2 || 0) * PRECIOS.paquete2 + (orden.mixto || 0) * PRECIOS.mixto;
+  const subtotalPollo = (orden.entero || 0) * PRECIOS.entero + (orden.mitad || 0) * PRECIOS.mitad + (orden.paquete15 || 0) * PRECIOS.paquete15 + (orden.paquete2 || 0) * PRECIOS.paquete2 + (orden.mixto || 0) * PRECIOS.mixto + (orden.paqueteFamiliar || 0) * PRECIOS.paqueteFamiliar;
   const subtotalCrujiente = (orden.crujienteEntero || 0) * PRECIOS.entero + (orden.crujienteMitad || 0) * PRECIOS.mitad + (orden.crujientePaq15 || 0) * PRECIOS.paquete15 + (orden.crujientePaq2 || 0) * PRECIOS.paquete2;
   const subtotalComplementos = (orden.tortillaMedio || 0) * PRECIOS.tortillaMedio + (orden.tortillaKilo || 0) * PRECIOS.tortillaKilo + (orden.refresco || 0) * PRECIOS.refresco;
   const costoEnvio = parseFloat(orden.domicilio) || 0;
   const totalOrden = subtotalPollo + subtotalCrujiente + subtotalComplementos + costoEnvio;
   
-  const pollosOrden = (orden.entero || 0) * EQUIVALENCIA_POLLOS.entero + (orden.mitad || 0) * EQUIVALENCIA_POLLOS.mitad + (orden.paquete15 || 0) * EQUIVALENCIA_POLLOS.paquete15 + (orden.paquete2 || 0) * EQUIVALENCIA_POLLOS.paquete2 + (orden.crujienteEntero || 0) * EQUIVALENCIA_POLLOS.entero + (orden.crujienteMitad || 0) * EQUIVALENCIA_POLLOS.mitad + (orden.crujientePaq15 || 0) * EQUIVALENCIA_POLLOS.paquete15 + (orden.crujientePaq2 || 0) * EQUIVALENCIA_POLLOS.paquete2 + (orden.mixto || 0) * EQUIVALENCIA_POLLOS.mixto;
+  const pollosOrden = (orden.entero || 0) * EQUIVALENCIA_POLLOS.entero + (orden.mitad || 0) * EQUIVALENCIA_POLLOS.mitad + (orden.paquete15 || 0) * EQUIVALENCIA_POLLOS.paquete15 + (orden.paquete2 || 0) * EQUIVALENCIA_POLLOS.paquete2 + (orden.crujienteEntero || 0) * EQUIVALENCIA_POLLOS.entero + (orden.crujienteMitad || 0) * EQUIVALENCIA_POLLOS.mitad + (orden.crujientePaq15 || 0) * EQUIVALENCIA_POLLOS.paquete15 + (orden.crujientePaq2 || 0) * EQUIVALENCIA_POLLOS.paquete2 + (orden.mixto || 0) * EQUIVALENCIA_POLLOS.mixto + (orden.paqueteFamiliar || 0) * EQUIVALENCIA_POLLOS.paqueteFamiliar;
   
-  const refrescosEnPaquetes = (orden.paquete15 || 0) + (orden.paquete2 || 0) + (orden.crujientePaq15 || 0) + (orden.crujientePaq2 || 0);
+  const refrescosEnPaquetes = (orden.paquete15 || 0) + (orden.paquete2 || 0) + (orden.crujientePaq15 || 0) + (orden.crujientePaq2 || 0) + (orden.paqueteFamiliar || 0);
   const refrescosOrden = (orden.refresco || 0) + refrescosEnPaquetes;
 
   const registrarVenta = async (e, tipo) => {
@@ -311,13 +325,14 @@ function App() {
       }
       await db.collection('ventas').add(nuevaVenta);
       
-      // RESTA ATÓMICA BLINDADA: No importa el lag de red, Firebase calcula la resta exacta en su servidor
       await db.collection('config').doc('stock').set({ 
         pollos: firebase.firestore.FieldValue.increment(-pollosOrden), 
         refrescos: firebase.firestore.FieldValue.increment(-refrescosOrden) 
       }, { merge: true });
 
-      setOrden({ entero: 0, mitad: 0, paquete15: 0, paquete2: 0, mixto: 0, crujienteEntero: 0, crujienteMitad: 0, crujientePaq15: 0, crujientePaq2: 0, tortillaMedio: 0, tortillaKilo: 0, refresco: 0, domicilio: '', notasEnvio: '', metodoPago: 'efectivo', telefono: '', nombreCliente: '' });
+      setOrden({ entero: 0, mitad: 0, paquete15: 0, paquete2: 0, mixto: 0, paqueteFamiliar: 0, crujienteEntero: 0, crujienteMitad: 0, crujientePaq15: 0, crujientePaq2: 0, tortillaMedio: 0, tortillaKilo: 0, refresco: 0, domicilio: '', notasEnvio: '', metodoPago: 'efectivo', telefono: '', nombreCliente: '' });
+      setBusquedaTelefonos([]);
+      setMostrarSugerencias(false);
     } catch (error) {
        setModalAlerta({ visible: true, mensaje: "Error al registrar la venta en la base de datos." });
     }
@@ -340,7 +355,6 @@ function App() {
           const v = ventas.find(v => v.id === idOriginal);
           if (v) {
             await db.collection('ventas').doc(dbId).delete();
-            // DEVOLUCIÓN ATÓMICA AL ELIMINAR TICKET
             await db.collection('config').doc('stock').set({ 
               pollos: firebase.firestore.FieldValue.increment(v.pollosTotales || 0), 
               refrescos: firebase.firestore.FieldValue.increment(v.refrescosTotales || 0) 
@@ -359,10 +373,12 @@ function App() {
       acc.ingresoEfectivo += v.metodoPago === 'efectivo' ? (v.total || 0) : 0;
       acc.ingresoTransferencia += v.metodoPago === 'transferencia' ? (v.total || 0) : 0;
       acc.pollos += v.pollosTotales || 0;
-      acc.refrescosVendidos += (det.refresco || 0) + (det.paquete15 || 0) + (det.paquete2 || 0) + (det.crujientePaq15 || 0) + (det.crujientePaq2 || 0);
+      acc.refrescosVendidos += (det.refresco || 0) + (det.paquete15 || 0) + (det.paquete2 || 0) + (det.crujientePaq15 || 0) + (det.crujientePaq2 || 0) + (det.paqueteFamiliar || 0);
       
       acc.crujientesReales += (det.crujienteEntero || 0) + (det.crujienteMitad || 0)*0.5 + (det.crujientePaq15 || 0)*1.5 + (det.crujientePaq2 || 0)*2 + (det.mixto || 0)*0.5;
-      acc.paquetesDescuento += (det.paquete15 || 0)*15 + (det.paquete2 || 0)*10 + (det.crujientePaq15 || 0)*15 + (det.crujientePaq2 || 0)*10;
+      
+      // EL DESCUENTO FANTASMA DEL PAQUETE FAMILIAR ($15) SE SUMA AQUÍ
+      acc.paquetesDescuento += (det.paquete15 || 0)*15 + (det.paquete2 || 0)*10 + (det.crujientePaq15 || 0)*15 + (det.crujientePaq2 || 0)*10 + (det.paqueteFamiliar || 0)*15;
       
       if (v.tipo === 'domicilio') {
           acc.cantidadEnvios += 1;
@@ -565,15 +581,25 @@ function App() {
                   
                   {vista === 'domicilio' && (
                     <div className="bg-gray-900 text-white p-4 rounded-xl shadow-inner space-y-3">
-                       <h3 className="text-xs font-black text-orange-500 uppercase tracking-widest border-b border-gray-800 pb-1 flex items-center gap-2"><Iconos.Star /> Identificador VIP</h3>
-                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                         <div>
-                           <label className="block text-[10px] text-gray-400 uppercase font-black mb-1">Teléfono (Celular)</label>
-                           <input type="text" name="telefono" placeholder="10 dígitos..." value={orden.telefono} onChange={handleOrdenChange} className="w-full text-gray-900 font-bold p-2.5 rounded-lg text-sm bg-white outline-none focus:ring-2 focus:ring-orange-500" />
+                       <h3 className="text-xs font-black text-orange-500 uppercase tracking-widest border-b border-gray-800 pb-1 flex items-center gap-2"><Iconos.Star /> Identificador Predictivo VIP</h3>
+                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 relative">
+                         <div className="relative">
+                           <label className="block text-[10px] text-gray-400 uppercase font-black mb-1 flex items-center gap-1"><Iconos.Search /> Búsqueda Telefónica</label>
+                           <input type="text" name="telefono" placeholder="Escribe el número..." value={orden.telefono} onChange={handleTelefonoChange} onFocus={() => orden.telefono.length > 2 && setMostrarSugerencias(true)} onBlur={() => setTimeout(() => setMostrarSugerencias(false), 200)} className="w-full text-gray-900 font-bold p-2.5 rounded-lg text-sm bg-white outline-none focus:ring-2 focus:ring-orange-500" />
+                           {mostrarSugerencias && busquedaTelefonos.length > 0 && (
+                             <ul className="absolute z-50 w-full bg-white border border-gray-300 rounded-lg shadow-xl mt-1 max-h-48 overflow-y-auto">
+                               {busquedaTelefonos.map(c => (
+                                 <li key={c.telefono} onClick={() => seleccionarClientePredictivo(c)} className="p-3 hover:bg-orange-100 cursor-pointer border-b border-gray-100 flex flex-col">
+                                   <span className="font-black text-gray-900">{c.telefono}</span>
+                                   <span className="text-xs text-orange-600 font-bold uppercase">{c.nombre}</span>
+                                 </li>
+                               ))}
+                             </ul>
+                           )}
                          </div>
                          <div>
                            <label className="block text-[10px] text-gray-400 uppercase font-black mb-1">Nombre Completo</label>
-                           <input type="text" name="nombreCliente" placeholder="Ej. Juan Pérez..." value={orden.nombreCliente} onChange={handleOrdenChange} className="w-full text-gray-900 font-bold p-2.5 rounded-lg text-sm bg-white outline-none" />
+                           <input type="text" name="nombreCliente" placeholder="Nombre..." value={orden.nombreCliente} onChange={handleOrdenChange} className="w-full text-gray-900 font-bold p-2.5 rounded-lg text-sm bg-gray-200 outline-none" />
                          </div>
                        </div>
                     </div>
@@ -598,6 +624,7 @@ function App() {
                   <div className="space-y-3 pt-2">
                     <h3 className="text-xs font-black text-purple-600 uppercase tracking-widest border-b border-purple-200 pb-1 mb-2">Especialidades</h3>
                     <ProductoInput nombre="Pollo Mixto (½ Asado + ½ Crujiente)" desc={`$${PRECIOS.mixto}`} name="mixto" value={orden.mixto} onChange={handleOrdenChange} />
+                    <ProductoInput nombre="Paquete Familiar (1.5 P. + Frijol + Salchicha + Ref)" desc={`$${PRECIOS.paqueteFamiliar}`} name="paqueteFamiliar" value={orden.paqueteFamiliar} onChange={handleOrdenChange} />
                   </div>
 
                   <div className="space-y-3 pt-2">
@@ -667,7 +694,8 @@ function App() {
                               {det.crujienteMitad > 0 && `${det.crujienteMitad} Cruj(Mit) `}
                               {det.crujientePaq15 > 0 && `${det.crujientePaq15} CrujPq(1.5) `}
                               {det.crujientePaq2 > 0 && `${det.crujientePaq2} CrujPq(2) `}
-                              {det.mixto > 0 && `${det.mixto} Pollo Mixto `}
+                              {det.mixto > 0 && `${det.mixto} P.Mixto `}
+                              {det.paqueteFamiliar > 0 && `${det.paqueteFamiliar} Paq.Familiar `}
                               {det.tortillaMedio > 0 && `${det.tortillaMedio} Tort(½) `}
                               {det.tortillaKilo > 0 && `${det.tortillaKilo} Tort(1kg) `}
                               {det.refresco > 0 && `${det.refresco} Ref `}
@@ -688,34 +716,53 @@ function App() {
         )}
 
         {vista === 'gastos' && (
-          <div className="max-w-lg mx-auto bg-white p-6 rounded-xl shadow-lg border-t-4 border-red-500">
-            <h3 className="font-black text-gray-800 mb-4 flex items-center gap-2"><Iconos.MinusCircle /> Registrar Gasto Físico</h3>
-            <p className="text-sm text-gray-500 mb-4">Usa esta ventana SOLO para el dinero que sacas de la caja (Ej. Hielo, Bolsas, Limpieza).</p>
-            <form onSubmit={registrarGasto} className="flex flex-col gap-3 mb-6">
-              <input type="text" placeholder="Ej. Hielo..." value={nuevoGasto.descripcion} onChange={(e) => setNuevoGasto({...nuevoGasto, descripcion: e.target.value})} className="w-full p-3 border rounded font-bold text-sm outline-none focus:border-red-500" />
-              <div className="flex gap-3">
-                <span className="p-3 bg-gray-100 border rounded text-gray-500 font-bold">$</span>
-                <input type="number" placeholder="0.00" value={nuevoGasto.monto} onChange={(e) => setNuevoGasto({...nuevoGasto, monto: e.target.value})} className="flex-1 p-3 border rounded font-bold text-center outline-none focus:border-red-500" />
-                <button type="submit" className="bg-red-600 hover:bg-red-700 text-white px-6 font-bold rounded shadow-md"><Iconos.PlusCircle /></button>
+          <div className="max-w-2xl mx-auto space-y-6">
+            <div className="bg-white p-6 rounded-xl shadow-lg border-t-4 border-yellow-500">
+              <h3 className="font-black text-gray-800 mb-4 flex items-center gap-2"><Iconos.Store /> Inventario Tortilla (Proveedor a $21)</h3>
+              <div className="grid grid-cols-2 gap-4 mb-4">
+                <div>
+                  <label className="text-xs font-bold text-gray-500 uppercase">KG Que Dejó:</label>
+                  <input type="number" value={tortillaProv.dejo} onChange={(e) => actualizarTortillaProv('dejo', e.target.value)} className="w-full p-3 border rounded text-center text-lg font-bold outline-none focus:border-yellow-500" />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-gray-500 uppercase">KG Que Regresa:</label>
+                  <input type="number" value={tortillaProv.regreso} onChange={(e) => actualizarTortillaProv('regreso', e.target.value)} className="w-full p-3 border rounded text-center text-lg font-bold outline-none focus:border-yellow-500" />
+                </div>
               </div>
-            </form>
+              <div className="bg-yellow-50 p-4 rounded flex justify-between items-center border border-yellow-200">
+                <span className="font-bold text-yellow-800">Costo a Pagar de Caja ({kgVendidosTortilla} kg):</span>
+                <span className="font-black text-2xl text-yellow-700">${pTortillaProveedor.toFixed(2)}</span>
+              </div>
+            </div>
 
-            <h4 className="font-bold text-sm text-gray-400 uppercase tracking-widest border-b pb-2 mb-3">Gastos de Hoy</h4>
-            <ul className="divide-y divide-gray-100 max-h-60 overflow-y-auto">
-              {gastosHoy.length === 0 ? (
-                <li className="text-sm text-gray-400 italic py-2">No hay gastos registrados hoy.</li>
-              ) : (
-                gastosHoy.map(g => (
-                  <li key={g.dbId || g.id} className="py-2 flex justify-between items-center text-sm">
-                    <span className="text-gray-700 uppercase font-bold">{g.descripcion}</span>
-                    <div className="flex items-center gap-3">
-                      <span className="text-red-600 font-black">-${(g.monto || 0).toFixed(2)}</span>
-                      {esPatron && <button onClick={() => eliminarRegistro(g.dbId, g.id, 'gasto')} className="text-red-400 hover:text-red-600"><Iconos.Trash2 /></button>}
-                    </div>
-                  </li>
-                ))
-              )}
-            </ul>
+            <div className="bg-white p-6 rounded-xl shadow-lg border-t-4 border-red-500">
+              <h3 className="font-black text-gray-800 mb-4 flex items-center gap-2"><Iconos.MinusCircle /> Registrar Gasto Físico Diario</h3>
+              <form onSubmit={registrarGasto} className="flex flex-col gap-3 mb-6">
+                <input type="text" placeholder="Ej. Hielo, Bolsas, Limpieza..." value={nuevoGasto.descripcion} onChange={(e) => setNuevoGasto({...nuevoGasto, descripcion: e.target.value})} className="w-full p-3 border rounded font-bold text-sm outline-none focus:border-red-500" />
+                <div className="flex gap-3">
+                  <span className="p-3 bg-gray-100 border rounded text-gray-500 font-bold">$</span>
+                  <input type="number" placeholder="0.00" value={nuevoGasto.monto} onChange={(e) => setNuevoGasto({...nuevoGasto, monto: e.target.value})} className="flex-1 p-3 border rounded font-bold text-center outline-none focus:border-red-500" />
+                  <button type="submit" className="bg-red-600 hover:bg-red-700 text-white px-6 font-bold rounded shadow-md"><Iconos.PlusCircle /></button>
+                </div>
+              </form>
+
+              <h4 className="font-bold text-sm text-gray-400 uppercase tracking-widest border-b pb-2 mb-3">Gastos Registrados Hoy</h4>
+              <ul className="divide-y divide-gray-100 max-h-60 overflow-y-auto">
+                {gastosHoy.length === 0 ? (
+                  <li className="text-sm text-gray-400 italic py-2">No hay gastos registrados hoy.</li>
+                ) : (
+                  gastosHoy.map(g => (
+                    <li key={g.dbId || g.id} className="py-3 flex justify-between items-center text-sm">
+                      <span className="text-gray-700 uppercase font-bold">{g.descripcion}</span>
+                      <div className="flex items-center gap-3">
+                        <span className="text-red-600 font-black">-${(g.monto || 0).toFixed(2)}</span>
+                        {esPatron && <button onClick={() => eliminarRegistro(g.dbId, g.id, 'gasto')} className="text-red-400 hover:text-red-600"><Iconos.Trash2 /></button>}
+                      </div>
+                    </li>
+                  ))
+                )}
+              </ul>
+            </div>
           </div>
         )}
 
@@ -764,24 +811,6 @@ function App() {
                   </div>
                 </div>
               </div>
-
-              <div className="bg-white p-6 rounded-xl shadow-lg border-t-4 border-yellow-500">
-                <h3 className="font-black text-gray-800 text-lg mb-4">Inventario Tortilla (Proveedor a $21)</h3>
-                <div className="grid grid-cols-2 gap-4 mb-4">
-                  <div>
-                    <label className="text-xs font-bold text-gray-500 uppercase">KG Que Dejó:</label>
-                    <input type="number" value={tortillaProv.dejo} onChange={(e) => actualizarTortillaProv('dejo', e.target.value)} className="w-full p-2 border rounded text-center text-lg font-bold" />
-                  </div>
-                  <div>
-                    <label className="text-xs font-bold text-gray-500 uppercase">KG Que Regresa:</label>
-                    <input type="number" value={tortillaProv.regreso} onChange={(e) => actualizarTortillaProv('regreso', e.target.value)} className="w-full p-2 border rounded text-center text-lg font-bold" />
-                  </div>
-                </div>
-                <div className="bg-yellow-50 p-3 rounded flex justify-between items-center border border-yellow-200">
-                  <span className="font-bold text-yellow-800">Costo a Pagar ({kgVendidosTortilla} kg):</span>
-                  <span className="font-black text-xl text-yellow-700">${pTortillaProveedor.toFixed(2)}</span>
-                </div>
-              </div>
             </div>
 
             <div className="bg-white p-6 rounded-xl shadow-lg border-t-4 border-green-500 h-fit">
@@ -798,7 +827,7 @@ function App() {
                 <div className="my-2 border-b-2 border-dashed border-gray-200"></div>
                 
                 <div className="flex justify-between p-2 text-red-600"><span>Gastos Físicos de Caja:</span> <span>-${resHoy.totalGastos.toFixed(2)}</span></div>
-                <div className="flex justify-between p-2 text-orange-600"><span>Desc. Paquetes:</span> <span>-${descPaquetesHoy.toFixed(2)}</span></div>
+                <div className="flex justify-between p-2 text-orange-600"><span>Desc. Paquetes (Incluye $15 de Familiar):</span> <span>-${descPaquetesHoy.toFixed(2)}</span></div>
                 <div className="flex justify-between p-2 text-yellow-600"><span>Pago Tortilla Proveedor:</span> <span>-${pTortillaProveedor.toFixed(2)}</span></div>
                 <div className="flex justify-between p-2 text-blue-600"><span>Pago a Repartidores (En Efectivo):</span> <span>-${pEnviosRepartidorEfectivo.toFixed(2)}</span></div>
               </div>
