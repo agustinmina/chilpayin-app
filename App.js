@@ -28,8 +28,8 @@ const db = firebase.firestore();
 
 // 4. Precios y equivalencias ACTUALIZADOS
 const PRECIOS = { 
-  entero: 150, mitad: 80, paquete15: 245, paquete2: 315, // Actualizado a 315
-  mixto: 150, paqueteFamiliar: 290, // Nuevas especialidades
+  entero: 150, mitad: 80, paquete15: 245, paquete2: 315,
+  mixto: 150, paqueteFamiliar: 290,
   tortillaMedio: 12, tortillaKilo: 24, refresco: 30 
 };
 const EQUIVALENCIA_POLLOS = { entero: 1, mitad: 0.5, paquete15: 1.5, paquete2: 2, mixto: 1, paqueteFamiliar: 1.5 };
@@ -68,9 +68,11 @@ function App() {
     telefono: '', nombreCliente: ''
   });
   
-  // Estados para autocompletado de clientes
+  // Estados para autocompletado de clientes (Teléfono y Nombre)
   const [busquedaTelefonos, setBusquedaTelefonos] = useState([]);
   const [mostrarSugerencias, setMostrarSugerencias] = useState(false);
+  const [busquedaNombres, setBusquedaNombres] = useState([]);
+  const [mostrarSugerenciasNombre, setMostrarSugerenciasNombre] = useState(false);
 
   const [nuevoGasto, setNuevoGasto] = useState({ descripcion: '', monto: '' });
   const [ingresoPollo, setIngresoPollo] = useState('');
@@ -192,12 +194,12 @@ function App() {
     const { name, value } = e.target;
     if (name === 'notasEnvio' || name === 'metodoPago' || name === 'nombreCliente') {
       setOrden(prev => ({ ...prev, [name]: value }));
-    } else if (name !== 'telefono') {
+    } else if (name !== 'telefono' && name !== 'nombreClienteBusqueda') {
       setOrden(prev => ({ ...prev, [name]: value === '' ? 0 : Math.max(0, parseInt(value) || 0) }));
     }
   };
 
-  // Motor de Búsqueda Predictiva VIP
+  // Búsqueda por Teléfono
   const handleTelefonoChange = (e) => {
     const valor = e.target.value.replace(/\D/g, '').slice(0, 10);
     setOrden(prev => ({ ...prev, telefono: valor }));
@@ -220,9 +222,35 @@ function App() {
     }
   };
 
+  // Búsqueda por Nombre
+  const handleNombreChange = (e) => {
+    const valor = e.target.value;
+    setOrden(prev => ({ ...prev, nombreCliente: valor }));
+
+    if (valor.length > 2) {
+      const coincidencias = [];
+      const vistos = new Set();
+      const valLower = valor.toLowerCase();
+      
+      clientesVIP.forEach(c => {
+        if (c.nombre && c.nombre.toLowerCase().includes(valLower) && !vistos.has(c.telefono)) {
+          coincidencias.push({ telefono: c.telefono, nombre: c.nombre });
+          vistos.add(c.telefono);
+        }
+      });
+      
+      setBusquedaNombres(coincidencias.slice(0, 5));
+      setMostrarSugerenciasNombre(true);
+    } else {
+      setMostrarSugerenciasNombre(false);
+    }
+  };
+
+  // Función para rellenar al hacer clic en sugerencia (funciona para teléfono o nombre)
   const seleccionarClientePredictivo = (cliente) => {
     setOrden(prev => ({ ...prev, telefono: cliente.telefono, nombreCliente: cliente.nombre }));
     setMostrarSugerencias(false);
+    setMostrarSugerenciasNombre(false);
   };
 
   const agregarClienteManual = async (e) => {
@@ -332,7 +360,9 @@ function App() {
 
       setOrden({ entero: 0, mitad: 0, paquete15: 0, paquete2: 0, mixto: 0, paqueteFamiliar: 0, crujienteEntero: 0, crujienteMitad: 0, crujientePaq15: 0, crujientePaq2: 0, tortillaMedio: 0, tortillaKilo: 0, refresco: 0, domicilio: '', notasEnvio: '', metodoPago: 'efectivo', telefono: '', nombreCliente: '' });
       setBusquedaTelefonos([]);
+      setBusquedaNombres([]);
       setMostrarSugerencias(false);
+      setMostrarSugerenciasNombre(false);
     } catch (error) {
        setModalAlerta({ visible: true, mensaje: "Error al registrar la venta en la base de datos." });
     }
@@ -581,11 +611,13 @@ function App() {
                   
                   {vista === 'domicilio' && (
                     <div className="bg-gray-900 text-white p-4 rounded-xl shadow-inner space-y-3">
-                       <h3 className="text-xs font-black text-orange-500 uppercase tracking-widest border-b border-gray-800 pb-1 flex items-center gap-2"><Iconos.Star /> Identificador Predictivo VIP</h3>
+                       <h3 className="text-xs font-black text-orange-500 uppercase tracking-widest border-b border-gray-800 pb-1 flex items-center gap-2"><Iconos.Star /> Búsqueda VIP Inteligente</h3>
                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 relative">
+                         
+                         {/* BUSCADOR DE TELÉFONO */}
                          <div className="relative">
-                           <label className="block text-[10px] text-gray-400 uppercase font-black mb-1 flex items-center gap-1"><Iconos.Search /> Búsqueda Telefónica</label>
-                           <input type="text" name="telefono" placeholder="Escribe el número..." value={orden.telefono} onChange={handleTelefonoChange} onFocus={() => orden.telefono.length > 2 && setMostrarSugerencias(true)} onBlur={() => setTimeout(() => setMostrarSugerencias(false), 200)} className="w-full text-gray-900 font-bold p-2.5 rounded-lg text-sm bg-white outline-none focus:ring-2 focus:ring-orange-500" />
+                           <label className="block text-[10px] text-gray-400 uppercase font-black mb-1 flex items-center gap-1"><Iconos.Search /> Buscar Número</label>
+                           <input type="text" name="telefono" placeholder="Ej. 921..." value={orden.telefono} onChange={handleTelefonoChange} onFocus={() => orden.telefono.length > 2 && setMostrarSugerencias(true)} onBlur={() => setTimeout(() => setMostrarSugerencias(false), 200)} className="w-full text-gray-900 font-bold p-2.5 rounded-lg text-sm bg-white outline-none focus:ring-2 focus:ring-orange-500" />
                            {mostrarSugerencias && busquedaTelefonos.length > 0 && (
                              <ul className="absolute z-50 w-full bg-white border border-gray-300 rounded-lg shadow-xl mt-1 max-h-48 overflow-y-auto">
                                {busquedaTelefonos.map(c => (
@@ -597,10 +629,23 @@ function App() {
                              </ul>
                            )}
                          </div>
-                         <div>
-                           <label className="block text-[10px] text-gray-400 uppercase font-black mb-1">Nombre Completo</label>
-                           <input type="text" name="nombreCliente" placeholder="Nombre..." value={orden.nombreCliente} onChange={handleOrdenChange} className="w-full text-gray-900 font-bold p-2.5 rounded-lg text-sm bg-gray-200 outline-none" />
+
+                         {/* BUSCADOR DE NOMBRE */}
+                         <div className="relative">
+                           <label className="block text-[10px] text-gray-400 uppercase font-black mb-1 flex items-center gap-1"><Iconos.Search /> Buscar Nombre</label>
+                           <input type="text" name="nombreCliente" placeholder="Ej. Juan..." value={orden.nombreCliente} onChange={handleNombreChange} onFocus={() => orden.nombreCliente.length > 2 && setMostrarSugerenciasNombre(true)} onBlur={() => setTimeout(() => setMostrarSugerenciasNombre(false), 200)} className="w-full text-gray-900 font-bold p-2.5 rounded-lg text-sm bg-white outline-none focus:ring-2 focus:ring-orange-500" />
+                           {mostrarSugerenciasNombre && busquedaNombres.length > 0 && (
+                             <ul className="absolute z-50 w-full bg-white border border-gray-300 rounded-lg shadow-xl mt-1 max-h-48 overflow-y-auto">
+                               {busquedaNombres.map(c => (
+                                 <li key={c.telefono} onClick={() => seleccionarClientePredictivo(c)} className="p-3 hover:bg-orange-100 cursor-pointer border-b border-gray-100 flex flex-col">
+                                   <span className="text-xs text-orange-600 font-bold uppercase">{c.nombre}</span>
+                                   <span className="font-black text-gray-900 text-[10px]">📞 {c.telefono}</span>
+                                 </li>
+                               ))}
+                             </ul>
+                           )}
                          </div>
+
                        </div>
                     </div>
                   )}
