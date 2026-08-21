@@ -28,9 +28,10 @@ const db = firebase.firestore();
 
 // 4. Precios y equivalencias ACTUALIZADOS
 const PRECIOS = { 
-  entero: 150, mitad: 80, paquete15: 245, paquete2: 315,
+  entero: 150, mitad: 80, paquete15: 250, paquete2: 320,
   mixto: 150, paqueteFamiliar: 290,
-  tortillaMedio: 12, tortillaKilo: 24, refresco: 30 
+  tortillaMedio: 12, tortillaKilo: 24, refresco: 30,
+  salchichas: 20, frijoles: 20 // Nuevos productos
 };
 const EQUIVALENCIA_POLLOS = { entero: 1, mitad: 0.5, paquete15: 1.5, paquete2: 2, mixto: 1, paqueteFamiliar: 1.5 };
 const PIN_PATRON = "1234";
@@ -63,7 +64,7 @@ function App() {
   const [orden, setOrden] = useState({ 
     entero: 0, mitad: 0, paquete15: 0, paquete2: 0, mixto: 0, paqueteFamiliar: 0,
     crujienteEntero: 0, crujienteMitad: 0, crujientePaq15: 0, crujientePaq2: 0,
-    tortillaMedio: 0, tortillaKilo: 0, refresco: 0, 
+    tortillaMedio: 0, tortillaKilo: 0, refresco: 0, salchichas: 0, frijoles: 0,
     domicilio: '', notasEnvio: '', metodoPago: 'efectivo',
     telefono: '', nombreCliente: ''
   });
@@ -246,7 +247,6 @@ function App() {
     }
   };
 
-  // Función para rellenar al hacer clic en sugerencia (funciona para teléfono o nombre)
   const seleccionarClientePredictivo = (cliente) => {
     setOrden(prev => ({ ...prev, telefono: cliente.telefono, nombreCliente: cliente.nombre }));
     setMostrarSugerencias(false);
@@ -323,7 +323,7 @@ function App() {
 
   const subtotalPollo = (orden.entero || 0) * PRECIOS.entero + (orden.mitad || 0) * PRECIOS.mitad + (orden.paquete15 || 0) * PRECIOS.paquete15 + (orden.paquete2 || 0) * PRECIOS.paquete2 + (orden.mixto || 0) * PRECIOS.mixto + (orden.paqueteFamiliar || 0) * PRECIOS.paqueteFamiliar;
   const subtotalCrujiente = (orden.crujienteEntero || 0) * PRECIOS.entero + (orden.crujienteMitad || 0) * PRECIOS.mitad + (orden.crujientePaq15 || 0) * PRECIOS.paquete15 + (orden.crujientePaq2 || 0) * PRECIOS.paquete2;
-  const subtotalComplementos = (orden.tortillaMedio || 0) * PRECIOS.tortillaMedio + (orden.tortillaKilo || 0) * PRECIOS.tortillaKilo + (orden.refresco || 0) * PRECIOS.refresco;
+  const subtotalComplementos = (orden.tortillaMedio || 0) * PRECIOS.tortillaMedio + (orden.tortillaKilo || 0) * PRECIOS.tortillaKilo + (orden.refresco || 0) * PRECIOS.refresco + (orden.salchichas || 0) * PRECIOS.salchichas + (orden.frijoles || 0) * PRECIOS.frijoles;
   const costoEnvio = parseFloat(orden.domicilio) || 0;
   const totalOrden = subtotalPollo + subtotalCrujiente + subtotalComplementos + costoEnvio;
   
@@ -358,7 +358,7 @@ function App() {
         refrescos: firebase.firestore.FieldValue.increment(-refrescosOrden) 
       }, { merge: true });
 
-      setOrden({ entero: 0, mitad: 0, paquete15: 0, paquete2: 0, mixto: 0, paqueteFamiliar: 0, crujienteEntero: 0, crujienteMitad: 0, crujientePaq15: 0, crujientePaq2: 0, tortillaMedio: 0, tortillaKilo: 0, refresco: 0, domicilio: '', notasEnvio: '', metodoPago: 'efectivo', telefono: '', nombreCliente: '' });
+      setOrden({ entero: 0, mitad: 0, paquete15: 0, paquete2: 0, mixto: 0, paqueteFamiliar: 0, crujienteEntero: 0, crujienteMitad: 0, crujientePaq15: 0, crujientePaq2: 0, tortillaMedio: 0, tortillaKilo: 0, refresco: 0, salchichas: 0, frijoles: 0, domicilio: '', notasEnvio: '', metodoPago: 'efectivo', telefono: '', nombreCliente: '' });
       setBusquedaTelefonos([]);
       setBusquedaNombres([]);
       setMostrarSugerencias(false);
@@ -407,8 +407,8 @@ function App() {
       
       acc.crujientesReales += (det.crujienteEntero || 0) + (det.crujienteMitad || 0)*0.5 + (det.crujientePaq15 || 0)*1.5 + (det.crujientePaq2 || 0)*2 + (det.mixto || 0)*0.5;
       
-      // EL DESCUENTO FANTASMA DEL PAQUETE FAMILIAR ($15) SE SUMA AQUÍ
-      acc.paquetesDescuento += (det.paquete15 || 0)*15 + (det.paquete2 || 0)*10 + (det.crujientePaq15 || 0)*15 + (det.crujientePaq2 || 0)*10 + (det.paqueteFamiliar || 0)*15;
+      // NUEVO CÁLCULO DE DESCUENTO: $20 x Paquetes Estándar | $15 x Paquete Familiar
+      acc.paquetesDescuento += (det.paquete15 || 0)*20 + (det.paquete2 || 0)*20 + (det.crujientePaq15 || 0)*20 + (det.crujientePaq2 || 0)*20 + (det.paqueteFamiliar || 0)*15;
       
       if (v.tipo === 'domicilio') {
           acc.cantidadEnvios += 1;
@@ -677,6 +677,8 @@ function App() {
                     <ProductoInput nombre="Tortilla (1/2 Kg)" desc={`$${PRECIOS.tortillaMedio}`} name="tortillaMedio" value={orden.tortillaMedio} onChange={handleOrdenChange} />
                     <ProductoInput nombre="Tortilla (1 Kg)" desc={`$${PRECIOS.tortillaKilo}`} name="tortillaKilo" value={orden.tortillaKilo} onChange={handleOrdenChange} />
                     <ProductoInput nombre="Refresco" desc={`$${PRECIOS.refresco}`} name="refresco" value={orden.refresco} onChange={handleOrdenChange} />
+                    <ProductoInput nombre="Salchichas Asadas" desc={`$${PRECIOS.salchichas}`} name="salchichas" value={orden.salchichas} onChange={handleOrdenChange} />
+                    <ProductoInput nombre="Frijoles Charros (½ L)" desc={`$${PRECIOS.frijoles}`} name="frijoles" value={orden.frijoles} onChange={handleOrdenChange} />
                   </div>
 
                   {vista === 'domicilio' && (
@@ -708,9 +710,15 @@ function App() {
             
             <section className="lg:col-span-6">
               <div className="bg-white rounded-xl shadow-lg border-t-4 border-gray-400 overflow-hidden mt-6 lg:mt-0">
-                <div className="bg-gray-50 p-3 border-b flex items-center gap-2">
-                  <Iconos.ListOrdered />
-                  <h2 className="text-sm font-bold text-gray-700">Registro de Hoy (En vivo)</h2>
+                <div className="bg-gray-50 p-3 border-b flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Iconos.ListOrdered />
+                    <h2 className="text-sm font-bold text-gray-700">Registro de Hoy (En vivo)</h2>
+                  </div>
+                  {/* MONITOR EN VIVO DE POLLOS */}
+                  <span className="bg-blue-100 text-blue-800 text-xs font-black px-3 py-1 rounded-full border border-blue-200 shadow-sm">
+                     🐔 {resHoy.pollos} Pollos Vendidos
+                  </span>
                 </div>
                 <div className="max-h-[500px] overflow-y-auto">
                   {ventasHoy.length === 0 ? (
@@ -744,6 +752,8 @@ function App() {
                               {det.tortillaMedio > 0 && `${det.tortillaMedio} Tort(½) `}
                               {det.tortillaKilo > 0 && `${det.tortillaKilo} Tort(1kg) `}
                               {det.refresco > 0 && `${det.refresco} Ref `}
+                              {det.salchichas > 0 && `${det.salchichas} Salchichas `}
+                              {det.frijoles > 0 && `${det.frijoles} Frijoles `}
                             </p>
                           </div>
                           <div className="flex flex-col items-end gap-2 ml-2">
@@ -872,7 +882,7 @@ function App() {
                 <div className="my-2 border-b-2 border-dashed border-gray-200"></div>
                 
                 <div className="flex justify-between p-2 text-red-600"><span>Gastos Físicos de Caja:</span> <span>-${resHoy.totalGastos.toFixed(2)}</span></div>
-                <div className="flex justify-between p-2 text-orange-600"><span>Desc. Paquetes (Incluye $15 de Familiar):</span> <span>-${descPaquetesHoy.toFixed(2)}</span></div>
+                <div className="flex justify-between p-2 text-orange-600"><span>Desc. Paquetes:</span> <span>-${descPaquetesHoy.toFixed(2)}</span></div>
                 <div className="flex justify-between p-2 text-yellow-600"><span>Pago Tortilla Proveedor:</span> <span>-${pTortillaProveedor.toFixed(2)}</span></div>
                 <div className="flex justify-between p-2 text-blue-600"><span>Pago a Repartidores (En Efectivo):</span> <span>-${pEnviosRepartidorEfectivo.toFixed(2)}</span></div>
               </div>
