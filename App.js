@@ -31,7 +31,7 @@ const PRECIOS = {
   entero: 150, mitad: 80, paquete15: 250, paquete2: 320,
   mixto: 150, paqueteFamiliar: 290,
   tortillaMedio: 12, tortillaKilo: 24, refresco: 30,
-  salchichas: 20, frijoles: 20 // Nuevos productos
+  salchichas: 20, frijoles: 20 
 };
 const EQUIVALENCIA_POLLOS = { entero: 1, mitad: 0.5, paquete15: 1.5, paquete2: 2, mixto: 1, paqueteFamiliar: 1.5 };
 const PIN_PATRON = "1234";
@@ -272,7 +272,6 @@ function App() {
     }
   };
 
-  // OPERACIONES ATÓMICAS BLINDADAS PARA EL STOCK
   const agregarStockPollo = async (e) => {
     e.preventDefault();
     const cantidad = parseFloat(ingresoPollo);
@@ -405,9 +404,11 @@ function App() {
       acc.pollos += v.pollosTotales || 0;
       acc.refrescosVendidos += (det.refresco || 0) + (det.paquete15 || 0) + (det.paquete2 || 0) + (det.crujientePaq15 || 0) + (det.crujientePaq2 || 0) + (det.paqueteFamiliar || 0);
       
+      acc.salchichasVendidas += (det.salchichas || 0);
+      acc.frijolesVendidos += (det.frijoles || 0);
+
       acc.crujientesReales += (det.crujienteEntero || 0) + (det.crujienteMitad || 0)*0.5 + (det.crujientePaq15 || 0)*1.5 + (det.crujientePaq2 || 0)*2 + (det.mixto || 0)*0.5;
       
-      // NUEVO CÁLCULO DE DESCUENTO: $20 x Paquetes Estándar | $15 x Paquete Familiar
       acc.paquetesDescuento += (det.paquete15 || 0)*20 + (det.paquete2 || 0)*20 + (det.crujientePaq15 || 0)*20 + (det.crujientePaq2 || 0)*20 + (det.paqueteFamiliar || 0)*15;
       
       if (v.tipo === 'domicilio') {
@@ -419,6 +420,7 @@ function App() {
     }, { 
       ventasTotales: 0, ingresoEfectivo: 0, ingresoTransferencia: 0, pollos: 0, 
       refrescosVendidos: 0, crujientesReales: 0, paquetesDescuento: 0, 
+      salchichasVendidas: 0, frijolesVendidos: 0,
       cantidadEnvios: 0, costoEnvioEfectivo: 0, costoEnvioTransferencia: 0,
       totalGastos: listaGastos.reduce((sum, g) => sum + (g.monto || 0), 0)
     });
@@ -428,6 +430,11 @@ function App() {
   
   const pollosInicialHoy = stockPollos + resHoy.pollos - (entradasHoy.pollos || 0);
   const refrescosInicialHoy = stockRefrescos + resHoy.refrescosVendidos - (entradasHoy.refrescos || 0);
+
+  // CÁLCULO DE DINERO DE EXTRAS PARA RETIRAR DE CAJA
+  const dineroSalchichas = resHoy.salchichasVendidas * PRECIOS.salchichas;
+  const dineroFrijoles = resHoy.frijolesVendidos * PRECIOS.frijoles;
+  const totalRetiroExtras = dineroSalchichas + dineroFrijoles;
 
   const historialDias = useMemo(() => {
     const grupos = {};
@@ -457,15 +464,18 @@ function App() {
         <table>
           <thead>
             <tr>
-              <th colspan="10" style="background-color: #ea580c; color: white; font-size: 24px; font-weight: bold; padding: 15px; text-align: center;">EL CHILPAYIN - REPORTE DE VENTAS Y UTILIDAD</th>
+              <th colspan="13" style="background-color: #ea580c; color: white; font-size: 24px; font-weight: bold; padding: 15px; text-align: center;">EL CHILPAYIN - REPORTE DE VENTAS Y UTILIDAD</th>
             </tr>
             <tr style="background-color: #1f2937; color: white; font-weight: bold;">
               <th>Fecha</th>
               <th>Pollos Vendidos</th>
+              <th>Salchichas</th>
+              <th>Frijoles</th>
               <th>Ventas Brutas</th>
               <th>Efectivo Cobrado</th>
               <th>Transferencias</th>
               <th>Gastos Físicos</th>
+              <th>Retiro Extras</th>
               <th>Pago Tortillería</th>
               <th>Pago Repartidor</th>
               <th>Ganancia Neta (Utilidad Libre)</th>
@@ -485,17 +495,22 @@ function App() {
       const cProduccion = rDia.pollos * costoPolloUnidad;
       const pEnvios = rDia.costoEnvioEfectivo + rDia.costoEnvioTransferencia;
       
-      const utilDia = vNetasReales - cProduccion - pTortillaDia - rDia.totalGastos - pEnvios;
+      const extrasMontoDia = (rDia.salchichasVendidas * PRECIOS.salchichas) + (rDia.frijolesVendidos * PRECIOS.frijoles);
+
+      const utilDia = vNetasReales - cProduccion - pTortillaDia - rDia.totalGastos - pEnvios - extrasMontoDia;
       const diezDia = utilDia > 0 ? utilDia * 0.10 : 0;
 
       tablaHTML += `
         <tr>
           <td style="font-weight: bold;">${dia.fecha}</td>
           <td style="color: #2563eb; font-weight: bold;">${rDia.pollos}</td>
+          <td style="color: #ea580c; font-weight: bold;">${rDia.salchichasVendidas}</td>
+          <td style="color: #9a3412; font-weight: bold;">${rDia.frijolesVendidos}</td>
           <td>$${rDia.ventasTotales.toFixed(2)}</td>
           <td style="color: #16a34a; font-weight: bold;">$${rDia.ingresoEfectivo.toFixed(2)}</td>
           <td style="color: #9333ea; font-weight: bold;">$${rDia.ingresoTransferencia.toFixed(2)}</td>
           <td style="color: #dc2626;">-$${rDia.totalGastos.toFixed(2)}</td>
+          <td style="color: #dc2626;">-$${extrasMontoDia.toFixed(2)}</td>
           <td style="color: #eab308;">-$${pTortillaDia.toFixed(2)}</td>
           <td style="color: #dc2626;">-$${pEnvios.toFixed(2)}</td>
           <td style="background-color: #dcfce7; font-weight: bold; color: #166534;">$${utilDia.toFixed(2)}</td>
@@ -525,11 +540,13 @@ function App() {
   const pEnviosRepartidorEfectivo = resHoy.costoEnvioEfectivo || 0;
   const descPaquetesHoy = resHoy.paquetesDescuento || 0;
   
-  const corteNetoFisicoHoy = resHoy.ingresoEfectivo - descPaquetesHoy - resHoy.totalGastos - pTortillaProveedor - pEnviosRepartidorEfectivo;
+  // RESTAMOS LOS EXTRAS DEL CORTE NETO FÍSICO PARA SACAR ESE EFECTIVO
+  const corteNetoFisicoHoy = resHoy.ingresoEfectivo - descPaquetesHoy - resHoy.totalGastos - pTortillaProveedor - pEnviosRepartidorEfectivo - totalRetiroExtras;
 
   const ventasNetasReales = (resHoy.ingresoEfectivo + resHoy.ingresoTransferencia) - descPaquetesHoy;
   const costoTotalProduccion = resHoy.pollos * costoPolloUnidad;
-  const utilidadRealHoy = ventasNetasReales - costoTotalProduccion - pTortillaProveedor - resHoy.totalGastos - (resHoy.costoEnvioEfectivo + resHoy.costoEnvioTransferencia);
+  // RESTAMOS LOS EXTRAS DE LA UTILIDAD REAL PORQUE SE RETIRAN
+  const utilidadRealHoy = ventasNetasReales - costoTotalProduccion - pTortillaProveedor - resHoy.totalGastos - (resHoy.costoEnvioEfectivo + resHoy.costoEnvioTransferencia) - totalRetiroExtras;
   const diezmoSugerido = utilidadRealHoy > 0 ? utilidadRealHoy * 0.10 : 0;
 
   const menuTabs = [
@@ -614,7 +631,6 @@ function App() {
                        <h3 className="text-xs font-black text-orange-500 uppercase tracking-widest border-b border-gray-800 pb-1 flex items-center gap-2"><Iconos.Star /> Búsqueda VIP Inteligente</h3>
                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 relative">
                          
-                         {/* BUSCADOR DE TELÉFONO */}
                          <div className="relative">
                            <label className="block text-[10px] text-gray-400 uppercase font-black mb-1 flex items-center gap-1"><Iconos.Search /> Buscar Número</label>
                            <input type="text" name="telefono" placeholder="Ej. 921..." value={orden.telefono} onChange={handleTelefonoChange} onFocus={() => orden.telefono.length > 2 && setMostrarSugerencias(true)} onBlur={() => setTimeout(() => setMostrarSugerencias(false), 200)} className="w-full text-gray-900 font-bold p-2.5 rounded-lg text-sm bg-white outline-none focus:ring-2 focus:ring-orange-500" />
@@ -630,7 +646,6 @@ function App() {
                            )}
                          </div>
 
-                         {/* BUSCADOR DE NOMBRE */}
                          <div className="relative">
                            <label className="block text-[10px] text-gray-400 uppercase font-black mb-1 flex items-center gap-1"><Iconos.Search /> Buscar Nombre</label>
                            <input type="text" name="nombreCliente" placeholder="Ej. Juan..." value={orden.nombreCliente} onChange={handleNombreChange} onFocus={() => orden.nombreCliente.length > 2 && setMostrarSugerenciasNombre(true)} onBlur={() => setTimeout(() => setMostrarSugerenciasNombre(false), 200)} className="w-full text-gray-900 font-bold p-2.5 rounded-lg text-sm bg-white outline-none focus:ring-2 focus:ring-orange-500" />
@@ -715,7 +730,6 @@ function App() {
                     <Iconos.ListOrdered />
                     <h2 className="text-sm font-bold text-gray-700">Registro de Hoy (En vivo)</h2>
                   </div>
-                  {/* MONITOR EN VIVO DE POLLOS */}
                   <span className="bg-blue-100 text-blue-800 text-xs font-black px-3 py-1 rounded-full border border-blue-200 shadow-sm">
                      🐔 {resHoy.pollos} Pollos Vendidos
                   </span>
@@ -882,9 +896,18 @@ function App() {
                 <div className="my-2 border-b-2 border-dashed border-gray-200"></div>
                 
                 <div className="flex justify-between p-2 text-red-600"><span>Gastos Físicos de Caja:</span> <span>-${resHoy.totalGastos.toFixed(2)}</span></div>
-                <div className="flex justify-between p-2 text-orange-600"><span>Desc. Paquetes:</span> <span>-${descPaquetesHoy.toFixed(2)}</span></div>
+                <div className="flex justify-between p-2 text-orange-600"><span>Desc. Paquetes (Incluye $15 de Familiar):</span> <span>-${descPaquetesHoy.toFixed(2)}</span></div>
                 <div className="flex justify-between p-2 text-yellow-600"><span>Pago Tortilla Proveedor:</span> <span>-${pTortillaProveedor.toFixed(2)}</span></div>
                 <div className="flex justify-between p-2 text-blue-600"><span>Pago a Repartidores (En Efectivo):</span> <span>-${pEnviosRepartidorEfectivo.toFixed(2)}</span></div>
+                
+                {/* EXTRAS DENTRO DEL TICKET DE CORTE */}
+                <div className="flex justify-between p-2 bg-pink-50 text-pink-800 rounded mt-2">
+                  <span>Retiro Salchichas ({resHoy.salchichasVendidas} pz):</span> <span>-${dineroSalchichas.toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between p-2 bg-amber-50 text-amber-800 rounded mt-2">
+                  <span>Retiro Frijoles ({resHoy.frijolesVendidos} pz):</span> <span>-${dineroFrijoles.toFixed(2)}</span>
+                </div>
+
               </div>
               <div className="mt-6 p-4 bg-green-600 rounded-lg text-white text-center shadow-inner">
                 <span className="block text-sm uppercase tracking-wider mb-1 font-semibold">Dinero Físico Neto en Caja</span>
@@ -914,6 +937,7 @@ function App() {
                 <div className="flex justify-between"><span>(-) Costo de Tortillas:</span> <span className="text-red-600">-${pTortillaProveedor.toFixed(2)}</span></div>
                 <div className="flex justify-between"><span>(-) Pago Envíos Totales:</span> <span className="text-red-600">-${(resHoy.costoEnvioEfectivo + resHoy.costoEnvioTransferencia).toFixed(2)}</span></div>
                 <div className="flex justify-between"><span>(-) Otros Gastos Físicos del Local:</span> <span className="text-red-600">-${resHoy.totalGastos.toFixed(2)}</span></div>
+                <div className="flex justify-between"><span>(-) Retiro Extras (Salchichas y Frijoles):</span> <span className="text-red-600">-${totalRetiroExtras.toFixed(2)}</span></div>
               </div>
 
               <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1023,8 +1047,10 @@ function App() {
                   const kgTortillaDia = (tortillaDia.dejo || 0) - (tortillaDia.regreso || 0);
                   const pTortillaDia = kgTortillaDia * 21;
                   const pEnviosEfectivoDia = resDia.costoEnvioEfectivo || 0;
+                  
+                  const extrasMontoDia = (resDia.salchichasVendidas * PRECIOS.salchichas) + (resDia.frijolesVendidos * PRECIOS.frijoles);
 
-                  const efectivoNetoFisicoDia = resDia.ingresoEfectivo - resDia.totalGastos - descPaquetesDia - pTortillaDia - pEnviosEfectivoDia;
+                  const efectivoNetoFisicoDia = resDia.ingresoEfectivo - resDia.totalGastos - descPaquetesDia - pTortillaDia - pEnviosEfectivoDia - extrasMontoDia;
 
                   return (
                     <div key={dia.fecha} className="p-4 sm:p-6 bg-gray-50">
