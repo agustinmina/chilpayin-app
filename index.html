@@ -1,27 +1,128 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>El Chilpayin - Punto de Venta</title>
-  
-  <script src="https://cdn.tailwindcss.com"></script>
-  
-  <script src="https://unpkg.com/react@18.2.0/umd/react.production.min.js" crossorigin></script>
-  <script src="https://unpkg.com/react-dom@18.2.0/umd/react-dom.production.min.js" crossorigin></script>
-  
-  <script src="https://unpkg.com/@babel/standalone@7.21.4/babel.min.js"></script>
-  
-  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-firestore.js"></script>
-  
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Caja - Asadero El Chilpayín</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; max-width: 600px; margin: auto; background-color: #f4f4f9; }
+        .seccion { background: white; border: 1px solid #ddd; padding: 15px; margin-bottom: 15px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        h3 { margin-top: 0; color: #333; border-bottom: 2px solid #e74c3c; padding-bottom: 5px; }
+        h4 { margin: 10px 0 5px 0; color: #555; }
+        label { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; font-size: 14px; }
+        input[type="number"] { width: 70px; padding: 6px; border: 1px solid #ccc; border-radius: 4px; text-align: center; }
+        .totales { background-color: #333; color: white; font-weight: bold; font-size: 1.2em; text-align: right; }
+        .totales input { background: #555; color: white; border: 1px solid #777; }
+        button { width: 100%; padding: 12px; background-color: #e74c3c; color: white; border: none; font-size: 1.1em; border-radius: 5px; cursor: pointer; font-weight: bold; }
+        button:hover { background-color: #c0392b; }
+    </style>
 </head>
-<body class="bg-gray-100">
-  
-  <div id="root"></div>
-  
-  <script type="text/babel" src="App.js"></script>
-  
+<body>
+
+    <h2 style="text-align: center; color: #333;">Asadero El Chilpayín</h2>
+
+    <div class="seccion">
+        <h3>Pollos Enteros y Mitades</h3>
+        <label>Pollo Asado ($150): <input type="number" id="cant-asado" min="0" value="" placeholder="0" oninput="calcular()"></label>
+        <label>Pollo Chiltepín ($155): <input type="number" id="cant-chiltepin" min="0" value="" placeholder="0" oninput="calcular()"></label>
+        <label>Pollo Enchipotlado ($155): <input type="number" id="cant-enchipotlado" min="0" value="" placeholder="0" oninput="calcular()"></label>
+        <label>Pollo Encebollado ($155): <input type="number" id="cant-encebollado" min="0" value="" placeholder="0" oninput="calcular()"></label>
+        <label>Mitad de Pollo ($80): <input type="number" id="cant-mitad" min="0" value="" placeholder="0" oninput="calcular()"></label>
+    </div>
+
+    <div class="seccion">
+        <h3>Pollo Crujiente y Paquetes</h3>
+        <label>Pollo Crujiente ($155): <input type="number" id="cant-crujiente" min="0" value="" placeholder="0" oninput="calcular()"></label>
+        
+        <hr style="border: 0; border-top: 1px dashed #ccc; margin: 15px 0;">
+        
+        <h4>Paquetes</h4>
+        <label>Paquete Asado ($250): <input type="number" id="paq-asado" min="0" value="" placeholder="0" oninput="calcular()"></label>
+        <label>Paq. (1 Sabor + 1/2 Asado) ($255): <input type="number" id="paq-sabor-medio" min="0" value="" placeholder="0" oninput="calcular()"></label>
+        <label>Paq. 2 Pollos (1 Asado + 1 Sabor) ($325): <input type="number" id="paq-2-sabores" min="0" value="" placeholder="0" oninput="calcular()"></label>
+        <label>Paq. 2 Pollos Asados ($320): <input type="number" id="paq-2-asados" min="0" value="" placeholder="0" oninput="calcular()"></label>
+    </div>
+
+    <div class="seccion">
+        <h3>Cobro Extra (Manual)</h3>
+        <label>Monto extra ($): <input type="number" id="cobro-extra" min="0" value="" placeholder="0" step="0.5" oninput="calcular()"></label>
+    </div>
+
+    <div class="seccion totales">
+        <p>Total a Pagar: $<span id="total-pagar">0.00</span></p>
+        <label style="justify-content: flex-end; gap: 10px; font-weight: normal; font-size: 0.9em;">
+            Efectivo Recibido: $ <input type="number" id="efectivo" min="0" value="" placeholder="0" oninput="calcular()">
+        </label>
+        <p style="color: #4cd137;">Cambio: $<span id="cambio">0.00</span></p>
+    </div>
+
+    <button type="button" onclick="limpiar()">Limpiar Cuenta</button>
+
+    <script>
+        const PRECIOS = {
+            asado: 150,
+            sabor: 155, 
+            mitad: 80,
+            paqAsado: 250,
+            paqSaborMedio: 255,
+            paq2Sabores: 325,
+            paq2Asados: 320
+        };
+
+        function calcular() {
+            // Lectura estricta numérica para evitar errores de NaN o concatenación
+            let cAsado = Number(document.getElementById('cant-asado').value) || 0;
+            let cChiltepin = Number(document.getElementById('cant-chiltepin').value) || 0;
+            let cEnchipotlado = Number(document.getElementById('cant-enchipotlado').value) || 0;
+            let cEncebollado = Number(document.getElementById('cant-encebollado').value) || 0;
+            let cCrujiente = Number(document.getElementById('cant-crujiente').value) || 0;
+            let cMitad = Number(document.getElementById('cant-mitad').value) || 0;
+
+            let pAsado = Number(document.getElementById('paq-asado').value) || 0;
+            let pSaborMedio = Number(document.getElementById('paq-sabor-medio').value) || 0;
+            let p2Sabores = Number(document.getElementById('paq-2-sabores').value) || 0;
+            let p2Asados = Number(document.getElementById('paq-2-asados').value) || 0;
+
+            let extra = Number(document.getElementById('cobro-extra').value) || 0;
+
+            // Multiplicaciones
+            let totalSabores = (cChiltepin + cEnchipotlado + cEncebollado + cCrujiente) * PRECIOS.sabor;
+            let totalAsado = cAsado * PRECIOS.asado;
+            let totalMitades = cMitad * PRECIOS.mitad;
+
+            let totalPaquetes = (pAsado * PRECIOS.paqAsado) + 
+                                (pSaborMedio * PRECIOS.paqSaborMedio) + 
+                                (p2Sabores * PRECIOS.paq2Sabores) + 
+                                (p2Asados * PRECIOS.paq2Asados);
+
+            // Suma final asegurada
+            let granTotal = totalAsado + totalSabores + totalMitades + totalPaquetes + extra;
+            document.getElementById('total-pagar').textContent = granTotal.toFixed(2);
+
+            // Resta para el cambio
+            let efectivo = Number(document.getElementById('efectivo').value) || 0;
+            let cambio = 0;
+
+            if (efectivo > 0) {
+                cambio = efectivo - granTotal;
+            }
+
+            // Validación: si el cliente da menos dinero del total, muestra un aviso.
+            let displayCambio = document.getElementById('cambio');
+            if (efectivo > 0 && cambio < 0) {
+                displayCambio.textContent = "Falta dinero";
+                displayCambio.style.color = "#ff4d4d";
+            } else {
+                displayCambio.textContent = cambio.toFixed(2);
+                displayCambio.style.color = "#4cd137";
+            }
+        }
+
+        function limpiar() {
+            let inputs = document.querySelectorAll('input[type="number"]');
+            inputs.forEach(input => input.value = "");
+            calcular();
+        }
+    </script>
 </body>
 </html>
