@@ -28,32 +28,15 @@ const db = firebase.firestore();
 
 // 4. Precios y equivalencias ACTUALIZADOS
 const PRECIOS = { 
-  asado: 150,
-  sabor: 155, // Chiltepín, Enchipotlado, Encebollado, Crujiente
-  mitad: 80,
-  paquete15Asado: 250,      // Paquete 1.5 Asado
-  paquete15Sabor: 255,      // Paquete 1 Sabor + 1/2 Asado
-  paquete2Asados: 320,      // Paquete 2 Pollos Asados
-  paquete2Sabores: 325,     // Paquete 2 Pollos (1 Asado + 1 Sabor)
-  mixto: 150,
-  paqueteFamiliar: 290,
-  tortillaMedio: 12,
-  tortillaKilo: 24,
-  refresco: 30,
-  salchichas: 20,
-  frijoles: 20 
+  entero: 150, mitad: 80, paquete15: 250, paquete2: 320,
+  mixto: 150, paqueteFamiliar: 290,
+  tortillaMedio: 12, tortillaKilo: 24, refresco: 30,
+  salchichas: 20, frijoles: 20 
 };
-
-const EQUIVALENCIA_POLLOS = { 
-  entero: 1, chiltepin: 1, enchipotlado: 1, encebollado: 1, crujienteEntero: 1,
-  mitad: 0.5, crujienteMitad: 0.5,
-  paquete15: 1.5, paqSaborMedio: 1.5, paquete2: 2, paq2Sabores: 2,
-  mixto: 1, paqueteFamiliar: 1.5 
-};
-
+const EQUIVALENCIA_POLLOS = { entero: 1, mitad: 0.5, paquete15: 1.5, paquete2: 2, mixto: 1, paqueteFamiliar: 1.5 };
 const PIN_PATRON = "1234";
 
-// 5. Componente de diseño para productos
+// 5. Componente de diseño
 const ProductoInput = ({ nombre, desc, name, value, onChange }) => (
   <div className="flex justify-between items-center bg-white border border-gray-200 p-2 rounded shadow-sm">
     <div>
@@ -61,9 +44,9 @@ const ProductoInput = ({ nombre, desc, name, value, onChange }) => (
       <span className="block text-xs text-orange-500 font-bold">{desc}</span>
     </div>
     <div className="flex items-center gap-2">
-      <button type="button" onClick={() => onChange({ target: { name, value: Math.max(0, (Number(value) || 0) - 1) } })} className="bg-red-500 text-white w-8 h-8 rounded font-black">-</button>
-      <input type="number" name={name} value={value === 0 || value === '' ? '' : value} onChange={onChange} min="0" className="w-12 text-center border rounded font-bold bg-gray-50 outline-none" placeholder="0" />
-      <button type="button" onClick={() => onChange({ target: { name, value: (Number(value) || 0) + 1 } })} className="bg-green-500 text-white w-8 h-8 rounded font-black">+</button>
+      <button type="button" onClick={() => onChange({ target: { name, value: Math.max(0, value - 1) } })} className="bg-red-500 text-white w-8 h-8 rounded font-black">-</button>
+      <input type="number" name={name} value={value === 0 ? '' : value} onChange={onChange} min="0" className="w-12 text-center border rounded font-bold bg-gray-50 outline-none" placeholder="0" />
+      <button type="button" onClick={() => onChange({ target: { name, value: value + 1 } })} className="bg-green-500 text-white w-8 h-8 rounded font-black">+</button>
     </div>
   </div>
 );
@@ -79,16 +62,14 @@ function App() {
   const [inputPin, setInputPin] = useState('');
 
   const [orden, setOrden] = useState({ 
-    entero: 0, chiltepin: 0, enchipotlado: 0, encebollado: 0, mitad: 0,
-    crujienteEntero: 0, crujienteMitad: 0, 
-    paquete15: 0, paqSaborMedio: 0, paquete2: 0, paq2Sabores: 0, mixto: 0, paqueteFamiliar: 0,
-    extraManual: '',
+    entero: 0, mitad: 0, paquete15: 0, paquete2: 0, mixto: 0, paqueteFamiliar: 0,
+    crujienteEntero: 0, crujienteMitad: 0, crujientePaq15: 0, crujientePaq2: 0,
     tortillaMedio: 0, tortillaKilo: 0, refresco: 0, salchichas: 0, frijoles: 0,
     domicilio: '', notasEnvio: '', metodoPago: 'efectivo',
     telefono: '', nombreCliente: ''
   });
   
-  // Estados para autocompletado de clientes
+  // Estados para autocompletado de clientes (Teléfono y Nombre)
   const [busquedaTelefonos, setBusquedaTelefonos] = useState([]);
   const [mostrarSugerencias, setMostrarSugerencias] = useState(false);
   const [busquedaNombres, setBusquedaNombres] = useState([]);
@@ -212,11 +193,9 @@ function App() {
 
   const handleOrdenChange = (e) => {
     const { name, value } = e.target;
-    if (['notasEnvio', 'metodoPago', 'nombreCliente', 'domicilio'].includes(name)) {
+    if (name === 'notasEnvio' || name === 'metodoPago' || name === 'nombreCliente') {
       setOrden(prev => ({ ...prev, [name]: value }));
-    } else if (name === 'extraManual') {
-      setOrden(prev => ({ ...prev, extraManual: value }));
-    } else if (name !== 'telefono') {
+    } else if (name !== 'telefono' && name !== 'nombreClienteBusqueda') {
       setOrden(prev => ({ ...prev, [name]: value === '' ? 0 : Math.max(0, parseInt(value) || 0) }));
     }
   };
@@ -339,59 +318,16 @@ function App() {
     }
   };
 
-  // CÁLCULOS MATEMÁTICOS DE LA ORDEN CON NUMERACIÓN ESTRICTA
-  const subtotalPollo = 
-    (Number(orden.entero) || 0) * PRECIOS.asado +
-    (Number(orden.chiltepin) || 0) * PRECIOS.sabor +
-    (Number(orden.enchipotlado) || 0) * PRECIOS.sabor +
-    (Number(orden.encebollado) || 0) * PRECIOS.sabor +
-    (Number(orden.mitad) || 0) * PRECIOS.mitad +
-    (Number(orden.paquete15) || 0) * PRECIOS.paquete15Asado +
-    (Number(orden.paqSaborMedio) || 0) * PRECIOS.paquete15Sabor +
-    (Number(orden.paquete2) || 0) * PRECIOS.paquete2Asados +
-    (Number(orden.paq2Sabores) || 0) * PRECIOS.paquete2Sabores +
-    (Number(orden.mixto) || 0) * PRECIOS.mixto +
-    (Number(orden.paqueteFamiliar) || 0) * PRECIOS.paqueteFamiliar;
-
-  const subtotalCrujiente = 
-    (Number(orden.crujienteEntero) || 0) * PRECIOS.sabor +
-    (Number(orden.crujienteMitad) || 0) * PRECIOS.mitad;
-
-  const subtotalComplementos = 
-    (Number(orden.tortillaMedio) || 0) * PRECIOS.tortillaMedio +
-    (Number(orden.tortillaKilo) || 0) * PRECIOS.tortillaKilo +
-    (Number(orden.refresco) || 0) * PRECIOS.refresco +
-    (Number(orden.salchichas) || 0) * PRECIOS.salchichas +
-    (Number(orden.frijoles) || 0) * PRECIOS.frijoles;
-
-  const extraManualMonto = Number(orden.extraManual) || 0;
-  const costoEnvio = Number(orden.domicilio) || 0;
-
-  const totalOrden = subtotalPollo + subtotalCrujiente + subtotalComplementos + extraManualMonto + costoEnvio;
-
-  const pollosOrden = 
-    (Number(orden.entero) || 0) * 1 +
-    (Number(orden.chiltepin) || 0) * 1 +
-    (Number(orden.enchipotlado) || 0) * 1 +
-    (Number(orden.encebollado) || 0) * 1 +
-    (Number(orden.crujienteEntero) || 0) * 1 +
-    (Number(orden.mitad) || 0) * 0.5 +
-    (Number(orden.crujienteMitad) || 0) * 0.5 +
-    (Number(orden.paquete15) || 0) * 1.5 +
-    (Number(orden.paqSaborMedio) || 0) * 1.5 +
-    (Number(orden.paquete2) || 0) * 2 +
-    (Number(orden.paq2Sabores) || 0) * 2 +
-    (Number(orden.mixto) || 0) * 1 +
-    (Number(orden.paqueteFamiliar) || 0) * 1.5;
-
-  const refrescosEnPaquetes = 
-    (Number(orden.paquete15) || 0) + 
-    (Number(orden.paqSaborMedio) || 0) + 
-    (Number(orden.paquete2) || 0) + 
-    (Number(orden.paq2Sabores) || 0) + 
-    (Number(orden.paqueteFamiliar) || 0);
-
-  const refrescosOrden = (Number(orden.refresco) || 0) + refrescosEnPaquetes;
+  const subtotalPollo = (orden.entero || 0) * PRECIOS.entero + (orden.mitad || 0) * PRECIOS.mitad + (orden.paquete15 || 0) * PRECIOS.paquete15 + (orden.paquete2 || 0) * PRECIOS.paquete2 + (orden.mixto || 0) * PRECIOS.mixto + (orden.paqueteFamiliar || 0) * PRECIOS.paqueteFamiliar;
+  const subtotalCrujiente = (orden.crujienteEntero || 0) * PRECIOS.entero + (orden.crujienteMitad || 0) * PRECIOS.mitad + (orden.crujientePaq15 || 0) * PRECIOS.paquete15 + (orden.crujientePaq2 || 0) * PRECIOS.paquete2;
+  const subtotalComplementos = (orden.tortillaMedio || 0) * PRECIOS.tortillaMedio + (orden.tortillaKilo || 0) * PRECIOS.tortillaKilo + (orden.refresco || 0) * PRECIOS.refresco + (orden.salchichas || 0) * PRECIOS.salchichas + (orden.frijoles || 0) * PRECIOS.frijoles;
+  const costoEnvio = parseFloat(orden.domicilio) || 0;
+  const totalOrden = subtotalPollo + subtotalCrujiente + subtotalComplementos + costoEnvio;
+  
+  const pollosOrden = (orden.entero || 0) * EQUIVALENCIA_POLLOS.entero + (orden.mitad || 0) * EQUIVALENCIA_POLLOS.mitad + (orden.paquete15 || 0) * EQUIVALENCIA_POLLOS.paquete15 + (orden.paquete2 || 0) * EQUIVALENCIA_POLLOS.paquete2 + (orden.crujienteEntero || 0) * EQUIVALENCIA_POLLOS.entero + (orden.crujienteMitad || 0) * EQUIVALENCIA_POLLOS.mitad + (orden.crujientePaq15 || 0) * EQUIVALENCIA_POLLOS.paquete15 + (orden.crujientePaq2 || 0) * EQUIVALENCIA_POLLOS.paquete2 + (orden.mixto || 0) * EQUIVALENCIA_POLLOS.mixto + (orden.paqueteFamiliar || 0) * EQUIVALENCIA_POLLOS.paqueteFamiliar;
+  
+  const refrescosEnPaquetes = (orden.paquete15 || 0) + (orden.paquete2 || 0) + (orden.crujientePaq15 || 0) + (orden.crujientePaq2 || 0) + (orden.paqueteFamiliar || 0);
+  const refrescosOrden = (orden.refresco || 0) + refrescosEnPaquetes;
 
   const registrarVenta = async (e, tipo) => {
     e.preventDefault();
@@ -401,8 +337,7 @@ function App() {
     const nuevaVenta = {
       id: Date.now(), tipo, fechaDia: hoyStr,
       hora: new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}),
-      detalles: { ...orden, extraManual: extraManualMonto }, 
-      subtotalPollo, subtotalCrujiente, subtotalComplementos, extraManual: extraManualMonto, costoEnvio,
+      detalles: { ...orden }, subtotalPollo, subtotalCrujiente, subtotalComplementos, costoEnvio,
       total: totalOrden, pollosTotales: pollosOrden, refrescosTotales: refrescosOrden, metodoPago: orden.metodoPago,
       telefono: orden.telefono || '', nombreCliente: orden.nombreCliente || '', notasEnvio: orden.notasEnvio || ''
     };
@@ -420,14 +355,7 @@ function App() {
         refrescos: firebase.firestore.FieldValue.increment(-refrescosOrden) 
       }, { merge: true });
 
-      setOrden({ 
-        entero: 0, chiltepin: 0, enchipotlado: 0, encebollado: 0, mitad: 0, 
-        crujienteEntero: 0, crujienteMitad: 0, 
-        paquete15: 0, paqSaborMedio: 0, paquete2: 0, paq2Sabores: 0, mixto: 0, paqueteFamiliar: 0,
-        extraManual: '',
-        tortillaMedio: 0, tortillaKilo: 0, refresco: 0, salchichas: 0, frijoles: 0, 
-        domicilio: '', notasEnvio: '', metodoPago: 'efectivo', telefono: '', nombreCliente: '' 
-      });
+      setOrden({ entero: 0, mitad: 0, paquete15: 0, paquete2: 0, mixto: 0, paqueteFamiliar: 0, crujienteEntero: 0, crujienteMitad: 0, crujientePaq15: 0, crujientePaq2: 0, tortillaMedio: 0, tortillaKilo: 0, refresco: 0, salchichas: 0, frijoles: 0, domicilio: '', notasEnvio: '', metodoPago: 'efectivo', telefono: '', nombreCliente: '' });
       setBusquedaTelefonos([]);
       setBusquedaNombres([]);
       setMostrarSugerencias(false);
@@ -472,17 +400,15 @@ function App() {
       acc.ingresoEfectivo += v.metodoPago === 'efectivo' ? (v.total || 0) : 0;
       acc.ingresoTransferencia += v.metodoPago === 'transferencia' ? (v.total || 0) : 0;
       acc.pollos += v.pollosTotales || 0;
+      acc.refrescosVendidos += (det.refresco || 0) + (det.paquete15 || 0) + (det.paquete2 || 0) + (det.crujientePaq15 || 0) + (det.crujientePaq2 || 0) + (det.paqueteFamiliar || 0);
       
-      const refPaq = (det.refresco || 0) + (det.paquete15 || 0) + (det.paqSaborMedio || 0) + (det.paquete2 || 0) + (det.paq2Sabores || 0) + (det.crujientePaq15 || 0) + (det.crujientePaq2 || 0) + (det.paqueteFamiliar || 0);
-      acc.refrescosVendidos += refPaq;
-      
-      acc.salchichasVendidas += (det.salchichas || 0);
-      acc.frijolesVendidos += (det.frijoles || 0);
-      acc.extrasManualesTotales += (det.extraManual ? Number(det.extraManual) : 0);
+      // AQUI SE SUMAN LOS EXTRAS SUELTOS + LOS EXTRAS DEL PAQUETE FAMILIAR
+      acc.salchichasVendidas += (det.salchichas || 0) + ((det.paqueteFamiliar || 0) * 2);
+      acc.frijolesVendidos += (det.frijoles || 0) + (det.paqueteFamiliar || 0);
 
       acc.crujientesReales += (det.crujienteEntero || 0) + (det.crujienteMitad || 0)*0.5 + (det.crujientePaq15 || 0)*1.5 + (det.crujientePaq2 || 0)*2 + (det.mixto || 0)*0.5;
       
-      acc.paquetesDescuento += (det.paquete15 || 0)*20 + (det.paqSaborMedio || 0)*20 + (det.paquete2 || 0)*20 + (det.paq2Sabores || 0)*20 + (det.paqueteFamiliar || 0)*15;
+      acc.paquetesDescuento += (det.paquete15 || 0)*20 + (det.paquete2 || 0)*20 + (det.crujientePaq15 || 0)*20 + (det.crujientePaq2 || 0)*20 + (det.paqueteFamiliar || 0)*15;
       
       if (v.tipo === 'domicilio') {
           acc.cantidadEnvios += 1;
@@ -493,7 +419,7 @@ function App() {
     }, { 
       ventasTotales: 0, ingresoEfectivo: 0, ingresoTransferencia: 0, pollos: 0, 
       refrescosVendidos: 0, crujientesReales: 0, paquetesDescuento: 0, 
-      salchichasVendidas: 0, frijolesVendidos: 0, extrasManualesTotales: 0,
+      salchichasVendidas: 0, frijolesVendidos: 0,
       cantidadEnvios: 0, costoEnvioEfectivo: 0, costoEnvioTransferencia: 0,
       totalGastos: listaGastos.reduce((sum, g) => sum + (g.monto || 0), 0)
     });
@@ -686,368 +612,500 @@ function App() {
       <main className="max-w-6xl mx-auto mt-6 px-2 sm:px-4">
         {(vista === 'local' || vista === 'domicilio') && (
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-            <section className="lg:col-span-7 space-y-4">
-              
-              {/* BLOQUE 1: POLLOS TRADICIONALES */}
-              <div className="bg-white rounded-xl shadow-sm border p-4 space-y-3">
-                <h3 className="text-sm font-black text-orange-600 uppercase tracking-wider border-b pb-1">Pollos Tradicionales y Sabores</h3>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  <ProductoInput nombre="Pollo Asado" desc="$150" name="entero" value={orden.entero} onChange={handleOrdenChange} />
-                  <ProductoInput nombre="Chiltepín" desc="$155" name="chiltepin" value={orden.chiltepin} onChange={handleOrdenChange} />
-                  <ProductoInput nombre="Enchipotlado" desc="$155" name="enchipotlado" value={orden.enchipotlado} onChange={handleOrdenChange} />
-                  <ProductoInput nombre="Encebollado" desc="$155" name="encebollado" value={orden.encebollado} onChange={handleOrdenChange} />
-                  <ProductoInput nombre="Mitad Asado" desc="$80" name="mitad" value={orden.mitad} onChange={handleOrdenChange} />
-                </div>
-              </div>
-
-              {/* BLOQUE 2: CRUJAN Y PAQUETES */}
-              <div className="bg-white rounded-xl shadow-sm border p-4 space-y-3 border-l-4 border-l-amber-500">
-                <h3 className="text-sm font-black text-amber-600 uppercase tracking-wider border-b pb-1">Pollo Crujiente y Paquetes</h3>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  <ProductoInput nombre="Crujiente Entero" desc="$155" name="crujienteEntero" value={orden.crujienteEntero} onChange={handleOrdenChange} />
-                  <ProductoInput nombre="Crujiente Mitad" desc="$80" name="crujienteMitad" value={orden.crujienteMitad} onChange={handleOrdenChange} />
-                </div>
-
-                <div className="border-t pt-2 mt-2">
-                  <h4 className="text-xs font-bold text-gray-500 uppercase mb-2">Paquetes Especiales</h4>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    <ProductoInput nombre="Paquete Asado (1.5)" desc="$250" name="paquete15" value={orden.paquete15} onChange={handleOrdenChange} />
-                    <ProductoInput nombre="Paq. Sabor + 1/2 Asado" desc="$255" name="paqSaborMedio" value={orden.paqSaborMedio} onChange={handleOrdenChange} />
-                    <ProductoInput nombre="Paq. 2 Pollos (1 Asado + 1 Sabor)" desc="$325" name="paq2Sabores" value={orden.paq2Sabores} onChange={handleOrdenChange} />
-                    <ProductoInput nombre="Paq. 2 Pollos Asados" desc="$320" name="paquete2" value={orden.paquete2} onChange={handleOrdenChange} />
-                    <ProductoInput nombre="Pollo Mixto" desc="$150" name="mixto" value={orden.mixto} onChange={handleOrdenChange} />
-                    <ProductoInput nombre="Paquete Familiar" desc="$290" name="paqueteFamiliar" value={orden.paqueteFamiliar} onChange={handleOrdenChange} />
+            <section className="lg:col-span-6">
+              <div className={`bg-white rounded-xl shadow-lg border-t-4 overflow-hidden ${vista === 'local' ? 'border-orange-500' : 'border-blue-500'}`}>
+                <div className="p-3 border-b flex items-center justify-between bg-gray-50">
+                  <div className="flex items-center gap-2">
+                    {vista === 'local' ? <Iconos.Store /> : <Iconos.Truck />}
+                    <h2 className="text-lg font-bold text-gray-800">{vista === 'local' ? 'Venta en Mostrador' : 'Servicio a Domicilio'}</h2>
                   </div>
                 </div>
-              </div>
-
-              {/* BLOQUE 3: COMPLEMENTOS Y EXTRAS */}
-              <div className="bg-white rounded-xl shadow-sm border p-4 space-y-3">
-                <h3 className="text-sm font-black text-gray-700 uppercase tracking-wider border-b pb-1">Complementos y Bebidas</h3>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  <ProductoInput nombre="Tortilla 1/2 Kg" desc="$12" name="tortillaMedio" value={orden.tortillaMedio} onChange={handleOrdenChange} />
-                  <ProductoInput nombre="Tortilla 1 Kg" desc="$24" name="tortillaKilo" value={orden.tortillaKilo} onChange={handleOrdenChange} />
-                  <ProductoInput nombre="Refresco 1.5L" desc="$30" name="refresco" value={orden.refresco} onChange={handleOrdenChange} />
-                  <ProductoInput nombre="Salchichas" desc="$20" name="salchichas" value={orden.salchichas} onChange={handleOrdenChange} />
-                  <ProductoInput nombre="Frijoles" desc="$20" name="frijoles" value={orden.frijoles} onChange={handleOrdenChange} />
-                </div>
-              </div>
-
-              {/* BLOQUE 4: CARGO EXTRA MANUAL */}
-              <div className="bg-orange-50 border border-orange-200 rounded-xl p-4 shadow-sm">
-                <h3 className="text-sm font-black text-orange-700 uppercase mb-2 flex items-center gap-2">
-                  <Iconos.PlusCircle /> Cobro Extra (Manual)
-                </h3>
-                <div className="flex items-center gap-3">
-                  <span className="font-bold text-gray-700">$</span>
-                  <input 
-                    type="number" 
-                    name="extraManual" 
-                    value={orden.extraManual} 
-                    onChange={handleOrdenChange} 
-                    placeholder="Monto extra manual" 
-                    min="0"
-                    step="0.5"
-                    className="w-full p-2.5 border rounded-lg font-bold text-lg text-gray-800 bg-white focus:ring-2 focus:ring-orange-500 outline-none"
-                  />
-                </div>
-              </div>
-
-            </section>
-
-            {/* COLUMNA DERECHA: RESUMEN Y ENVÍO */}
-            <section className="lg:col-span-5 space-y-4">
-              {vista === 'domicilio' && (
-                <div className="bg-gray-900 text-white p-4 rounded-xl shadow-inner space-y-3">
-                  <h3 className="text-xs font-black text-orange-500 uppercase tracking-widest border-b border-gray-800 pb-1 flex items-center gap-2">
-                    <Iconos.Star /> Búsqueda VIP e Información
-                  </h3>
+                <form onSubmit={(e) => registrarVenta(e, vista)} className="p-4 space-y-4">
                   
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 relative">
-                    <div className="relative">
-                      <label className="block text-[10px] text-gray-400 uppercase font-black mb-1">Buscar Número</label>
-                      <input 
-                        type="text" 
-                        name="telefono" 
-                        placeholder="Ej. 921..." 
-                        value={orden.telefono} 
-                        onChange={handleTelefonoChange} 
-                        onFocus={() => orden.telefono.length > 2 && setMostrarSugerencias(true)} 
-                        className="w-full text-gray-900 font-bold p-2.5 rounded-lg text-sm outline-none" 
-                      />
-                      {mostrarSugerencias && busquedaTelefonos.length > 0 && (
-                        <div className="absolute top-full left-0 right-0 bg-white text-gray-900 border rounded-b-lg shadow-xl z-20 max-h-40 overflow-y-auto">
-                          {busquedaTelefonos.map((c, idx) => (
-                            <div key={idx} onMouseDown={() => seleccionarClientePredictivo(c)} className="p-2 hover:bg-orange-100 cursor-pointer text-xs border-b">
-                              <span className="font-bold block">{c.telefono}</span>
-                              <span className="text-gray-600">{c.nombre}</span>
+                  {vista === 'domicilio' && (
+                    <div className="bg-gray-900 text-white p-4 rounded-xl shadow-inner space-y-3">
+                       <h3 className="text-xs font-black text-orange-500 uppercase tracking-widest border-b border-gray-800 pb-1 flex items-center gap-2"><Iconos.Star /> Búsqueda VIP Inteligente</h3>
+                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 relative">
+                         
+                         <div className="relative">
+                           <label className="block text-[10px] text-gray-400 uppercase font-black mb-1 flex items-center gap-1"><Iconos.Search /> Buscar Número</label>
+                           <input type="text" name="telefono" placeholder="Ej. 921..." value={orden.telefono} onChange={handleTelefonoChange} onFocus={() => orden.telefono.length > 2 && setMostrarSugerencias(true)} onBlur={() => setTimeout(() => setMostrarSugerencias(false), 200)} className="w-full text-gray-900 font-bold p-2.5 rounded-lg text-sm bg-white outline-none focus:ring-2 focus:ring-orange-500" />
+                           {mostrarSugerencias && busquedaTelefonos.length > 0 && (
+                             <ul className="absolute z-50 w-full bg-white border border-gray-300 rounded-lg shadow-xl mt-1 max-h-48 overflow-y-auto">
+                               {busquedaTelefonos.map(c => (
+                                 <li key={c.telefono} onClick={() => seleccionarClientePredictivo(c)} className="p-3 hover:bg-orange-100 cursor-pointer border-b border-gray-100 flex flex-col">
+                                   <span className="font-black text-gray-900">{c.telefono}</span>
+                                   <span className="text-xs text-orange-600 font-bold uppercase">{c.nombre}</span>
+                                 </li>
+                               ))}
+                             </ul>
+                           )}
+                         </div>
+
+                         <div className="relative">
+                           <label className="block text-[10px] text-gray-400 uppercase font-black mb-1 flex items-center gap-1"><Iconos.Search /> Buscar Nombre</label>
+                           <input type="text" name="nombreCliente" placeholder="Ej. Juan..." value={orden.nombreCliente} onChange={handleNombreChange} onFocus={() => orden.nombreCliente.length > 2 && setMostrarSugerenciasNombre(true)} onBlur={() => setTimeout(() => setMostrarSugerenciasNombre(false), 200)} className="w-full text-gray-900 font-bold p-2.5 rounded-lg text-sm bg-white outline-none focus:ring-2 focus:ring-orange-500" />
+                           {mostrarSugerenciasNombre && busquedaNombres.length > 0 && (
+                             <ul className="absolute z-50 w-full bg-white border border-gray-300 rounded-lg shadow-xl mt-1 max-h-48 overflow-y-auto">
+                               {busquedaNombres.map(c => (
+                                 <li key={c.telefono} onClick={() => seleccionarClientePredictivo(c)} className="p-3 hover:bg-orange-100 cursor-pointer border-b border-gray-100 flex flex-col">
+                                   <span className="text-xs text-orange-600 font-bold uppercase">{c.nombre}</span>
+                                   <span className="font-black text-gray-900 text-[10px]">📞 {c.telefono}</span>
+                                 </li>
+                               ))}
+                             </ul>
+                           )}
+                         </div>
+
+                       </div>
+                    </div>
+                  )}
+
+                  <div className="space-y-3">
+                    <h3 className="text-xs font-black text-gray-400 uppercase tracking-widest border-b pb-1 mb-2">Pollo Asado</h3>
+                    <ProductoInput nombre="Pollo Entero" desc={`$${PRECIOS.entero}`} name="entero" value={orden.entero} onChange={handleOrdenChange} />
+                    <ProductoInput nombre="Medio Pollo" desc={`$${PRECIOS.mitad}`} name="mitad" value={orden.mitad} onChange={handleOrdenChange} />
+                    <ProductoInput nombre="Paquete 1.5 Pollos" desc={`$${PRECIOS.paquete15}`} name="paquete15" value={orden.paquete15} onChange={handleOrdenChange} />
+                    <ProductoInput nombre="Paquete 2 Pollos" desc={`$${PRECIOS.paquete2}`} name="paquete2" value={orden.paquete2} onChange={handleOrdenChange} />
+                  </div>
+
+                  <div className="space-y-3 pt-2">
+                    <h3 className="text-xs font-black text-orange-600 uppercase tracking-widest border-b pb-1 mb-2">Pollo Crujiente</h3>
+                    <ProductoInput nombre="Crujiente Entero" desc={`$${PRECIOS.entero}`} name="crujienteEntero" value={orden.crujienteEntero} onChange={handleOrdenChange} />
+                    <ProductoInput nombre="Medio Crujiente" desc={`$${PRECIOS.mitad}`} name="crujienteMitad" value={orden.crujienteMitad} onChange={handleOrdenChange} />
+                    <ProductoInput nombre="Paq. 1.5 Crujiente" desc={`$${PRECIOS.paquete15}`} name="crujientePaq15" value={orden.crujientePaq15} onChange={handleOrdenChange} />
+                    <ProductoInput nombre="Paq. 2 Crujiente" desc={`$${PRECIOS.paquete2}`} name="crujientePaq2" value={orden.crujientePaq2} onChange={handleOrdenChange} />
+                  </div>
+
+                  <div className="space-y-3 pt-2">
+                    <h3 className="text-xs font-black text-purple-600 uppercase tracking-widest border-b border-purple-200 pb-1 mb-2">Especialidades</h3>
+                    <ProductoInput nombre="Pollo Mixto (½ Asado + ½ Crujiente)" desc={`$${PRECIOS.mixto}`} name="mixto" value={orden.mixto} onChange={handleOrdenChange} />
+                    <ProductoInput nombre="Paquete Familiar (1.5 P. + Frijol + Salchicha + Ref)" desc={`$${PRECIOS.paqueteFamiliar}`} name="paqueteFamiliar" value={orden.paqueteFamiliar} onChange={handleOrdenChange} />
+                  </div>
+
+                  <div className="space-y-3 pt-2">
+                    <h3 className="text-xs font-black text-gray-400 uppercase tracking-widest border-b pb-1 mb-2">Complementos Extras</h3>
+                    <ProductoInput nombre="Tortilla (1/2 Kg)" desc={`$${PRECIOS.tortillaMedio}`} name="tortillaMedio" value={orden.tortillaMedio} onChange={handleOrdenChange} />
+                    <ProductoInput nombre="Tortilla (1 Kg)" desc={`$${PRECIOS.tortillaKilo}`} name="tortillaKilo" value={orden.tortillaKilo} onChange={handleOrdenChange} />
+                    <ProductoInput nombre="Refresco" desc={`$${PRECIOS.refresco}`} name="refresco" value={orden.refresco} onChange={handleOrdenChange} />
+                    <ProductoInput nombre="Salchichas Asadas" desc={`$${PRECIOS.salchichas}`} name="salchichas" value={orden.salchichas} onChange={handleOrdenChange} />
+                    <ProductoInput nombre="Frijoles Charros (½ L)" desc={`$${PRECIOS.frijoles}`} name="frijoles" value={orden.frijoles} onChange={handleOrdenChange} />
+                  </div>
+
+                  {vista === 'domicilio' && (
+                    <div className="bg-blue-50 p-3 rounded-lg border border-blue-200 space-y-3 mt-4">
+                      <div className="flex items-center justify-between gap-2">
+                        <label className="font-semibold text-gray-700 text-sm">Costo Envío ($)</label>
+                        <input type="number" name="domicilio" min="0" placeholder="0" value={orden.domicilio} onChange={handleOrdenChange} className="w-20 text-center border-gray-300 rounded-md p-2 font-bold" />
+                      </div>
+                      <input type="text" name="notasEnvio" placeholder="Dirección de entrega completa..." value={orden.notasEnvio} onChange={handleOrdenChange} className="w-full text-sm p-2 border rounded font-semibold bg-white" />
+                    </div>
+                  )}
+
+                  <div className="pt-2">
+                    <h3 className="text-xs font-black text-gray-400 uppercase tracking-widest mb-2">Método de Pago</h3>
+                    <div className="flex gap-2">
+                        <button type="button" onClick={() => setOrden({...orden, metodoPago: 'efectivo'})} className={`flex-1 py-2 flex items-center justify-center gap-2 rounded border-2 font-bold ${orden.metodoPago === 'efectivo' ? 'bg-green-100 border-green-500 text-green-700' : 'bg-gray-50 text-gray-400'}`}><Iconos.Banknote /> Efectivo</button>
+                        <button type="button" onClick={() => setOrden({...orden, metodoPago: 'transferencia'})} className={`flex-1 py-2 flex items-center justify-center gap-2 rounded border-2 font-bold ${orden.metodoPago === 'transferencia' ? 'bg-purple-100 border-purple-500 text-purple-700' : 'bg-gray-50 text-gray-400'}`}><Iconos.CreditCard /> Transf.</button>
+                    </div>
+                  </div>
+
+                  <div className="bg-gray-50 p-4 rounded-lg flex justify-between items-center border mt-4">
+                    <span className="text-gray-600 font-bold uppercase text-sm">Total a Cobrar</span>
+                    <span className="text-3xl font-black text-red-600">${totalOrden.toFixed(2)}</span>
+                  </div>
+                  <button type="submit" className={`w-full text-white font-bold py-3 rounded-lg shadow-md flex items-center justify-center gap-2 text-lg ${vista === 'local' ? 'bg-orange-600' : 'bg-blue-600'}`}><Iconos.PlusCircle /> Registrar Venta</button>
+                </form>
+              </div>
+            </section>
+            
+            <section className="lg:col-span-6">
+              <div className="bg-white rounded-xl shadow-lg border-t-4 border-gray-400 overflow-hidden mt-6 lg:mt-0">
+                <div className="bg-gray-50 p-3 border-b flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Iconos.ListOrdered />
+                    <h2 className="text-sm font-bold text-gray-700">Registro de Hoy (En vivo)</h2>
+                  </div>
+                  <span className="bg-blue-100 text-blue-800 text-xs font-black px-3 py-1 rounded-full border border-blue-200 shadow-sm">
+                     🐔 {resHoy.pollos} Pollos Vendidos
+                  </span>
+                </div>
+                <div className="max-h-[500px] overflow-y-auto">
+                  {ventasHoy.length === 0 ? (
+                    <p className="p-6 text-center text-gray-400 text-sm">Sin ventas registradas hoy.</p>
+                  ) : (
+                    <ul className="divide-y divide-gray-100">
+                      {ventasHoy.map((v) => {
+                        let det = v.detalles || {};
+                        return (
+                        <li key={v.dbId || v.id} className="p-3 hover:bg-gray-50 flex justify-between items-start">
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2 mb-1">
+                              <span className="text-xs font-bold bg-gray-200 text-gray-700 px-2 py-0.5 rounded">{v.hora}</span>
+                              <span className={`text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded ${v.metodoPago === 'efectivo' ? 'bg-green-100 text-green-700' : 'bg-purple-100 text-purple-700'}`}>{v.metodoPago}</span>
+                              {v.tipo === 'domicilio' && <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded bg-blue-100 text-blue-700">Envío</span>}
                             </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="relative">
-                      <label className="block text-[10px] text-gray-400 uppercase font-black mb-1">Nombre Cliente</label>
-                      <input 
-                        type="text" 
-                        name="nombreCliente" 
-                        placeholder="Nombre" 
-                        value={orden.nombreCliente} 
-                        onChange={handleNombreChange} 
-                        onFocus={() => orden.nombreCliente.length > 2 && setMostrarSugerenciasNombre(true)} 
-                        className="w-full text-gray-900 font-bold p-2.5 rounded-lg text-sm outline-none" 
-                      />
-                      {mostrarSugerenciasNombre && busquedaNombres.length > 0 && (
-                        <div className="absolute top-full left-0 right-0 bg-white text-gray-900 border rounded-b-lg shadow-xl z-20 max-h-40 overflow-y-auto">
-                          {busquedaNombres.map((c, idx) => (
-                            <div key={idx} onMouseDown={() => seleccionarClientePredictivo(c)} className="p-2 hover:bg-orange-100 cursor-pointer text-xs border-b">
-                              <span className="font-bold block">{c.nombre}</span>
-                              <span className="text-gray-600">{c.telefono}</span>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-[10px] text-gray-400 uppercase font-black mb-1">Costo Envio ($)</label>
-                      <input type="number" name="domicilio" value={orden.domicilio} onChange={handleOrdenChange} placeholder="0" className="w-full text-gray-900 font-bold p-2.5 rounded-lg text-sm outline-none" />
-                    </div>
-                    <div>
-                      <label className="block text-[10px] text-gray-400 uppercase font-black mb-1">Notas Envío</label>
-                      <input type="text" name="notasEnvio" value={orden.notasEnvio} onChange={handleOrdenChange} placeholder="Dirección / Ref" className="w-full text-gray-900 font-bold p-2.5 rounded-lg text-sm outline-none" />
-                    </div>
-                  </div>
+                            {v.nombreCliente && (
+                              <p className="text-xs font-black text-gray-800 uppercase">👤 {v.nombreCliente} <span className="text-gray-400 font-normal">({v.telefono})</span></p>
+                            )}
+                            <p className="text-xs text-gray-600 font-medium leading-relaxed mt-1">
+                              {det.entero > 0 && `${det.entero} Asad(Ent) `}
+                              {det.mitad > 0 && `${det.mitad} Asad(Mit) `}
+                              {det.paquete15 > 0 && `${det.paquete15} AsadPq(1.5) `}
+                              {det.paquete2 > 0 && `${det.paquete2} AsadPq(2) `}
+                              {det.crujienteEntero > 0 && `${det.crujienteEntero} Cruj(Ent) `}
+                              {det.crujienteMitad > 0 && `${det.crujienteMitad} Cruj(Mit) `}
+                              {det.crujientePaq15 > 0 && `${det.crujientePaq15} CrujPq(1.5) `}
+                              {det.crujientePaq2 > 0 && `${det.crujientePaq2} CrujPq(2) `}
+                              {det.mixto > 0 && `${det.mixto} P.Mixto `}
+                              {det.paqueteFamiliar > 0 && `${det.paqueteFamiliar} Paq.Familiar `}
+                              {det.tortillaMedio > 0 && `${det.tortillaMedio} Tort(½) `}
+                              {det.tortillaKilo > 0 && `${det.tortillaKilo} Tort(1kg) `}
+                              {det.refresco > 0 && `${det.refresco} Ref `}
+                              {det.salchichas > 0 && `${det.salchichas} Salchichas `}
+                              {det.frijoles > 0 && `${det.frijoles} Frijoles `}
+                            </p>
+                          </div>
+                          <div className="flex flex-col items-end gap-2 ml-2">
+                            <span className="font-bold text-gray-800">${(v.total || 0).toFixed(2)}</span>
+                            {esPatron && <button onClick={() => eliminarRegistro(v.dbId, v.id, 'venta')} className="text-red-400 hover:text-red-600 p-1"><Iconos.Trash2 /></button>}
+                          </div>
+                        </li>
+                      )})}
+                    </ul>
+                  )}
                 </div>
-              )}
-
-              {/* COBRO FINAL */}
-              <div className="bg-white rounded-xl shadow-lg border p-5 space-y-4">
-                <h3 className="text-base font-black text-gray-800 border-b pb-2 flex justify-between items-center">
-                  <span>Resumen de Cobro</span>
-                  <span className="text-2xl text-orange-600 font-black">${totalOrden.toFixed(2)}</span>
-                </h3>
-
-                <div className="space-y-1 text-sm text-gray-600 border-b pb-3">
-                  <div className="flex justify-between"><span>Pollos:</span><span className="font-bold">${subtotalPollo.toFixed(2)}</span></div>
-                  <div className="flex justify-between"><span>Crujiente:</span><span className="font-bold">${subtotalCrujiente.toFixed(2)}</span></div>
-                  <div className="flex justify-between"><span>Complementos:</span><span className="font-bold">${subtotalComplementos.toFixed(2)}</span></div>
-                  {extraManualMonto > 0 && <div className="flex justify-between text-orange-600 font-bold"><span>Extra Manual:</span><span>+${extraManualMonto.toFixed(2)}</span></div>}
-                  {costoEnvio > 0 && <div className="flex justify-between text-blue-600 font-bold"><span>Envío:</span><span>+${costoEnvio.toFixed(2)}</span></div>}
-                </div>
-
-                <div className="space-y-2">
-                  <label className="block text-xs font-black text-gray-500 uppercase">Método de Pago</label>
-                  <div className="grid grid-cols-2 gap-2">
-                    <button type="button" onClick={() => setOrden(prev => ({ ...prev, metodoPago: 'efectivo' }))} className={`py-2 rounded-lg font-bold text-sm flex items-center justify-center gap-1 ${orden.metodoPago === 'efectivo' ? 'bg-green-600 text-white shadow' : 'bg-gray-100 text-gray-700'}`}>
-                      <Iconos.Banknote /> Efectivo
-                    </button>
-                    <button type="button" onClick={() => setOrden(prev => ({ ...prev, metodoPago: 'transferencia' }))} className={`py-2 rounded-lg font-bold text-sm flex items-center justify-center gap-1 ${orden.metodoPago === 'transferencia' ? 'bg-purple-600 text-white shadow' : 'bg-gray-100 text-gray-700'}`}>
-                      <Iconos.CreditCard /> Transferencia
-                    </button>
-                  </div>
-                </div>
-
-                <button 
-                  type="button" 
-                  onClick={(e) => registrarVenta(e, vista)} 
-                  className={`w-full py-3.5 rounded-xl text-white font-black text-lg shadow-lg hover:opacity-90 transition ${vista === 'local' ? 'bg-orange-600' : 'bg-blue-600'}`}
-                >
-                  Registrar Venta (${totalOrden.toFixed(2)})
-                </button>
               </div>
             </section>
           </div>
         )}
 
-        {/* VISTA GASTOS */}
         {vista === 'gastos' && (
           <div className="max-w-2xl mx-auto space-y-6">
-            <div className="bg-white p-6 rounded-xl shadow-lg border">
-              <h2 className="text-xl font-bold mb-4 flex items-center gap-2 text-red-600"><Iconos.MinusCircle /> Registrar Gasto</h2>
-              <form onSubmit={registrarGasto} className="space-y-4">
+            <div className="bg-white p-6 rounded-xl shadow-lg border-t-4 border-yellow-500">
+              <h3 className="font-black text-gray-800 mb-4 flex items-center gap-2"><Iconos.Store /> Inventario Tortilla (Proveedor a $21)</h3>
+              <div className="grid grid-cols-2 gap-4 mb-4">
                 <div>
-                  <label className="block text-sm font-bold text-gray-700 mb-1">Descripción</label>
-                  <input type="text" value={nuevoGasto.descripcion} onChange={(e) => setNuevoGasto(prev => ({ ...prev, descripcion: e.target.value }))} placeholder="Ej. Carbón, Verduras..." className="w-full p-2.5 border rounded-lg outline-none font-bold" />
+                  <label className="text-xs font-bold text-gray-500 uppercase">KG Que Dejó:</label>
+                  <input type="number" value={tortillaProv.dejo} onChange={(e) => actualizarTortillaProv('dejo', e.target.value)} className="w-full p-3 border rounded text-center text-lg font-bold outline-none focus:border-yellow-500" />
                 </div>
                 <div>
-                  <label className="block text-sm font-bold text-gray-700 mb-1">Monto ($)</label>
-                  <input type="number" value={nuevoGasto.monto} onChange={(e) => setNuevoGasto(prev => ({ ...prev, monto: e.target.value }))} placeholder="0.00" className="w-full p-2.5 border rounded-lg outline-none font-bold" />
+                  <label className="text-xs font-bold text-gray-500 uppercase">KG Que Regresa:</label>
+                  <input type="number" value={tortillaProv.regreso} onChange={(e) => actualizarTortillaProv('regreso', e.target.value)} className="w-full p-3 border rounded text-center text-lg font-bold outline-none focus:border-yellow-500" />
                 </div>
-                <button type="submit" className="w-full bg-red-600 text-white py-3 rounded-lg font-bold shadow">Guardar Gasto</button>
+              </div>
+              <div className="bg-yellow-50 p-4 rounded flex justify-between items-center border border-yellow-200">
+                <span className="font-bold text-yellow-800">Costo a Pagar de Caja ({kgVendidosTortilla} kg):</span>
+                <span className="font-black text-2xl text-yellow-700">${pTortillaProveedor.toFixed(2)}</span>
+              </div>
+            </div>
+
+            <div className="bg-white p-6 rounded-xl shadow-lg border-t-4 border-red-500">
+              <h3 className="font-black text-gray-800 mb-4 flex items-center gap-2"><Iconos.MinusCircle /> Registrar Gasto Físico Diario</h3>
+              <form onSubmit={registrarGasto} className="flex flex-col gap-3 mb-6">
+                <input type="text" placeholder="Ej. Hielo, Bolsas, Limpieza..." value={nuevoGasto.descripcion} onChange={(e) => setNuevoGasto({...nuevoGasto, descripcion: e.target.value})} className="w-full p-3 border rounded font-bold text-sm outline-none focus:border-red-500" />
+                <div className="flex gap-3">
+                  <span className="p-3 bg-gray-100 border rounded text-gray-500 font-bold">$</span>
+                  <input type="number" placeholder="0.00" value={nuevoGasto.monto} onChange={(e) => setNuevoGasto({...nuevoGasto, monto: e.target.value})} className="flex-1 p-3 border rounded font-bold text-center outline-none focus:border-red-500" />
+                  <button type="submit" className="bg-red-600 hover:bg-red-700 text-white px-6 font-bold rounded shadow-md"><Iconos.PlusCircle /></button>
+                </div>
+              </form>
+
+              <h4 className="font-bold text-sm text-gray-400 uppercase tracking-widest border-b pb-2 mb-3">Gastos Registrados Hoy</h4>
+              <ul className="divide-y divide-gray-100 max-h-60 overflow-y-auto">
+                {gastosHoy.length === 0 ? (
+                  <li className="text-sm text-gray-400 italic py-2">No hay gastos registrados hoy.</li>
+                ) : (
+                  gastosHoy.map(g => (
+                    <li key={g.dbId || g.id} className="py-3 flex justify-between items-center text-sm">
+                      <span className="text-gray-700 uppercase font-bold">{g.descripcion}</span>
+                      <div className="flex items-center gap-3">
+                        <span className="text-red-600 font-black">-${(g.monto || 0).toFixed(2)}</span>
+                        {esPatron && <button onClick={() => eliminarRegistro(g.dbId, g.id, 'gasto')} className="text-red-400 hover:text-red-600"><Iconos.Trash2 /></button>}
+                      </div>
+                    </li>
+                  ))
+                )}
+              </ul>
+            </div>
+          </div>
+        )}
+
+        {esPatron && vista === 'cierre' && (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="space-y-6">
+              <div className="bg-white p-6 rounded-xl shadow-lg border-t-4 border-indigo-500">
+                <h3 className="font-black text-gray-800 text-lg mb-4">Stock de Mercancía Físico</h3>
+                <div className="space-y-4">
+                  <div className="bg-indigo-50 p-4 rounded-lg flex flex-col gap-2 border border-indigo-100">
+                    <div className="flex justify-between items-center border-b border-indigo-200 pb-2 mb-1">
+                      <span className="font-black text-indigo-900">Stock Real en Hielera:</span>
+                      <span className={`text-4xl font-black ${stockPollos <= 5 ? 'text-red-600' : 'text-indigo-600'}`}>{stockPollos}</span>
+                    </div>
+                    <form onSubmit={agregarStockPollo} className="flex gap-2">
+                      <input type="number" step="0.5" placeholder="Sumar Compras (+)" value={ingresoPollo} onChange={(e) => setIngresoPollo(e.target.value)} className="flex-1 border p-2 rounded text-center font-bold outline-none focus:border-indigo-500" />
+                      <button type="submit" className="bg-indigo-600 text-white px-4 rounded font-bold">Sumar</button>
+                    </form>
+                    <form onSubmit={restarMermaPollo} className="flex gap-2 mt-1">
+                      <input type="number" step="0.5" placeholder="Restar Mermas (-)" value={mermaPollo} onChange={(e) => setMermaPollo(e.target.value)} className="flex-1 border border-red-300 p-2 rounded text-center font-bold outline-none text-red-600 focus:border-red-500" />
+                      <button type="submit" className="bg-red-600 text-white px-4 rounded font-bold">Restar</button>
+                    </form>
+                    <div className="flex justify-between text-indigo-800 font-bold text-xs mt-2 opacity-80">
+                      <span>Iniciaste el día con: {pollosInicialHoy}</span>
+                      <span>Vendidos hoy: {resHoy.pollos}</span>
+                    </div>
+                  </div>
+
+                  <div className="bg-blue-50 p-4 rounded-lg flex flex-col gap-2 border border-blue-100 mt-4">
+                    <div className="flex justify-between items-center border-b border-blue-200 pb-2 mb-1">
+                      <span className="font-black text-blue-900">Refrescos Reales:</span>
+                      <span className={`text-4xl font-black ${stockRefrescos <= 5 ? 'text-red-600' : 'text-blue-600'}`}>{stockRefrescos}</span>
+                    </div>
+                    <form onSubmit={agregarStockRefresco} className="flex gap-2">
+                      <input type="number" placeholder="Sumar Compras (+)" value={ingresoRefresco} onChange={(e) => setIngresoRefresco(e.target.value)} className="flex-1 border p-2 rounded text-center font-bold outline-none focus:border-blue-500" />
+                      <button type="submit" className="bg-blue-600 text-white px-4 rounded font-bold">Sumar</button>
+                    </form>
+                    <form onSubmit={restarMermaRefresco} className="flex gap-2 mt-1">
+                      <input type="number" placeholder="Restar Mermas (-)" value={mermaRefresco} onChange={(e) => setMermaRefresco(e.target.value)} className="flex-1 border border-red-300 p-2 rounded text-center font-bold outline-none text-red-600 focus:border-red-500" />
+                      <button type="submit" className="bg-red-600 text-white px-4 rounded font-bold">Restar</button>
+                    </form>
+                    <div className="flex justify-between text-blue-800 font-bold text-xs mt-2 opacity-80">
+                      <span>Iniciaste el día con: {refrescosInicialHoy}</span>
+                      <span>Vendidos hoy: {resHoy.refrescosVendidos}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-white p-6 rounded-xl shadow-lg border-t-4 border-green-500 h-fit">
+              <h3 className="font-black text-gray-800 text-lg mb-4">Corte de Caja de Hoy (Físico)</h3>
+              <div className="space-y-2 text-sm font-bold text-gray-600">
+                <div className="flex justify-between p-2 bg-gray-50 rounded"><span>Ventas Totales (Bruto):</span> <span>${resHoy.ventasTotales.toFixed(2)}</span></div>
+                <div className="flex justify-between p-2 bg-green-50 text-green-800 rounded"><span>Cobrado en Efectivo:</span> <span>${resHoy.ingresoEfectivo.toFixed(2)}</span></div>
+                <div className="flex justify-between p-2 bg-purple-50 text-purple-800 rounded"><span>Cobrado x Transferencia:</span> <span>${resHoy.ingresoTransferencia.toFixed(2)}</span></div>
+                
+                <div className="flex justify-between p-2 bg-blue-50 text-blue-800 rounded mt-2">
+                  <span>Envíos a Domicilio Realizados:</span> <span>{resHoy.cantidadEnvios} Viajes</span>
+                </div>
+
+                <div className="my-2 border-b-2 border-dashed border-gray-200"></div>
+                
+                <div className="flex justify-between p-2 text-red-600"><span>Gastos Físicos de Caja:</span> <span>-${resHoy.totalGastos.toFixed(2)}</span></div>
+                <div className="flex justify-between p-2 text-orange-600"><span>Desc. Paquetes (Incluye $15 de Familiar):</span> <span>-${descPaquetesHoy.toFixed(2)}</span></div>
+                <div className="flex justify-between p-2 text-yellow-600"><span>Pago Tortilla Proveedor:</span> <span>-${pTortillaProveedor.toFixed(2)}</span></div>
+                <div className="flex justify-between p-2 text-blue-600"><span>Pago a Repartidores (En Efectivo):</span> <span>-${pEnviosRepartidorEfectivo.toFixed(2)}</span></div>
+                
+                {/* EXTRAS DENTRO DEL TICKET DE CORTE */}
+                <div className="flex justify-between p-2 bg-pink-50 text-pink-800 rounded mt-2">
+                  <span>Retiro Salchichas ({resHoy.salchichasVendidas} pz):</span> <span>-${dineroSalchichas.toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between p-2 bg-amber-50 text-amber-800 rounded mt-2">
+                  <span>Retiro Frijoles ({resHoy.frijolesVendidos} pz):</span> <span>-${dineroFrijoles.toFixed(2)}</span>
+                </div>
+
+              </div>
+              <div className="mt-6 p-4 bg-green-600 rounded-lg text-white text-center shadow-inner">
+                <span className="block text-sm uppercase tracking-wider mb-1 font-semibold">Dinero Físico Neto en Caja</span>
+                <span className="text-4xl font-black">${corteNetoFisicoHoy.toFixed(2)}</span>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {esPatron && vista === 'utilidad' && (
+          <div className="max-w-3xl mx-auto space-y-6">
+            <div className="bg-white p-6 rounded-xl shadow-lg border-t-4 border-orange-500">
+              <h2 className="font-black text-xl text-gray-800 mb-2">Cálculo de Ganancia Real y Diezmo</h2>
+              <div className="flex items-center gap-4 bg-orange-50 p-4 rounded-lg border border-orange-200 mb-6">
+                 <div>
+                    <label className="block text-xs font-bold text-orange-800 uppercase mb-1">Costo Operativo por Pollo ($)</label>
+                    <input type="number" step="0.5" value={costoPolloUnidad} onChange={(e) => setCostoPolloUnidad(e.target.value)} onBlur={(e) => guardarCostoMateriaPrima(e.target.value)} className="w-32 p-2 border rounded font-black text-xl text-center outline-none focus:border-orange-500" />
+                 </div>
+                 <div className="text-sm font-semibold text-orange-900 opacity-80 leading-tight">
+                    El sistema multiplicará este costo operativo por los {resHoy.pollos} pollos vendidos hoy.
+                 </div>
+              </div>
+
+              <div className="space-y-2 text-sm font-bold text-gray-700 bg-gray-50 p-4 rounded-lg border">
+                <div className="flex justify-between pb-2 border-b"><span>(+) Ingresos Netos de Hoy:</span> <span className="text-green-600">${ventasNetasReales.toFixed(2)}</span></div>
+                <div className="flex justify-between pt-2"><span>(-) Costo de Producción:</span> <span className="text-red-600">-${costoTotalProduccion.toFixed(2)}</span></div>
+                <div className="flex justify-between"><span>(-) Costo de Tortillas:</span> <span className="text-red-600">-${pTortillaProveedor.toFixed(2)}</span></div>
+                <div className="flex justify-between"><span>(-) Pago Envíos Totales:</span> <span className="text-red-600">-${(resHoy.costoEnvioEfectivo + resHoy.costoEnvioTransferencia).toFixed(2)}</span></div>
+                <div className="flex justify-between"><span>(-) Otros Gastos Físicos del Local:</span> <span className="text-red-600">-${resHoy.totalGastos.toFixed(2)}</span></div>
+                <div className="flex justify-between"><span>(-) Retiro Extras (Salchichas y Frijoles):</span> <span className="text-red-600">-${totalRetiroExtras.toFixed(2)}</span></div>
+              </div>
+
+              <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-4">
+                 <div className="p-6 bg-gray-900 text-white rounded-xl shadow text-center">
+                    <span className="block text-xs uppercase opacity-80 tracking-widest mb-2 font-bold">Ganancia Libre del Día</span>
+                    <span className="text-4xl font-black">${utilidadRealHoy.toFixed(2)}</span>
+                 </div>
+                 <div className="p-6 bg-yellow-500 text-yellow-900 rounded-xl shadow text-center border-2 border-yellow-600">
+                    <span className="block text-xs uppercase opacity-80 tracking-widest mb-2 font-black">Diezmo Sugerido (10%)</span>
+                    <span className="text-5xl font-black text-white drop-shadow-md">${diezmoSugerido.toFixed(2)}</span>
+                 </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {esPatron && vista === 'vip' && (
+          <div className="max-w-4xl mx-auto space-y-6">
+            <div className="bg-gray-900 rounded-xl shadow-lg border-t-4 border-blue-500 overflow-hidden text-white p-4 sm:p-6">
+              <h3 className="font-black text-lg flex items-center gap-2 mb-2"><Iconos.Users /> Importar Cliente a la Agenda (Sin Ventas)</h3>
+              <p className="text-xs text-gray-400 mb-4">Mete aquí los números de tu libreta vieja. Cuando el cajero teclee este número en un envío, el nombre aparecerá solo.</p>
+              
+              <form onSubmit={agregarClienteManual} className="flex flex-col sm:flex-row gap-3">
+                 <input type="text" placeholder="Teléfono a 10 dígitos..." value={nuevoClienteManual.telefono} onChange={(e) => setNuevoClienteManual({...nuevoClienteManual, telefono: e.target.value.replace(/\D/g, '').slice(0, 10)})} className="flex-1 p-3 rounded-lg font-bold text-gray-900 outline-none focus:ring-2 focus:ring-blue-500" />
+                 <input type="text" placeholder="Nombre completo..." value={nuevoClienteManual.nombre} onChange={(e) => setNuevoClienteManual({...nuevoClienteManual, nombre: e.target.value})} className="flex-1 p-3 rounded-lg font-bold text-gray-900 outline-none focus:ring-2 focus:ring-blue-500" />
+                 <button type="submit" className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg shadow-md transition-colors"><Iconos.PlusCircle /> Guardar Cliente</button>
               </form>
             </div>
 
-            <div className="bg-white p-6 rounded-xl shadow-lg border">
-              <h3 className="font-bold text-lg mb-3">Gastos de Hoy ({hoyStr})</h3>
-              <div className="space-y-2 max-h-60 overflow-y-auto">
-                {gastosHoy.map(g => (
-                  <div key={g.dbId} className="flex justify-between items-center p-3 bg-red-50 border border-red-100 rounded-lg">
-                    <div>
-                      <span className="font-bold block text-gray-800">{g.descripcion}</span>
-                      <span className="text-xs text-red-500 font-bold">${g.monto.toFixed(2)}</span>
+            <div className="bg-white rounded-xl shadow-lg border-t-4 border-orange-500 overflow-hidden">
+               <div className="bg-gray-800 p-4 text-white">
+                  <h3 className="font-black text-lg flex items-center gap-2"><Iconos.Star /> Bóveda de Fidelización: Clientes VIP</h3>
+                  <p className="text-xs text-gray-400 mt-1">Análisis de lealtad basado en el número de pedidos a domicilio y volumen total de pollos.</p>
+               </div>
+               <div className="p-4 space-y-4 max-h-[600px] overflow-y-auto">
+                  {clientesVIP.length === 0 ? (
+                    <p className="text-sm text-gray-500 italic text-center py-6">Aún no hay clientes registrados con número telefónico.</p>
+                  ) : (
+                    clientesVIP.map((cliente, index) => {
+                      let colorFondo = "bg-gray-50 border-gray-200";
+                      let etiquetaStatus = "Cliente Nuevo / Importado";
+                      let colorBadge = "bg-gray-200 text-gray-600 border-gray-300";
+
+                      if (cliente.totalPedidos > 0 && cliente.totalPedidos <= 2) {
+                        colorBadge = "bg-red-100 text-red-800 border-red-200";
+                        etiquetaStatus = "Cliente Ocasional";
+                      } else if (cliente.totalPedidos >= 3 && cliente.totalPedidos <= 6) {
+                        colorFondo = "bg-blue-50/50 border-blue-100";
+                        etiquetaStatus = "Cliente Frecuente";
+                        colorBadge = "bg-blue-100 text-blue-800 border-blue-200";
+                      } else if (cliente.totalPedidos >= 7) {
+                        colorFondo = "bg-green-50 border-green-200 ring-2 ring-green-600/20";
+                        etiquetaStatus = "👑 VIP MASTER";
+                        colorBadge = "bg-green-600 text-white font-black";
+                      }
+
+                      return (
+                        <div key={cliente.telefono} className={`p-4 rounded-xl border flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 ${colorFondo}`}>
+                           <div className="space-y-1">
+                              <div className="flex items-center gap-3">
+                                 <span className="font-black text-gray-400 text-sm">#{index + 1}</span>
+                                 <h4 className="font-black text-base text-gray-900 uppercase">{cliente.nombre}</h4>
+                                 <span className={`text-[10px] uppercase font-bold px-2.5 py-0.5 rounded-full border ${colorBadge}`}>{etiquetaStatus}</span>
+                              </div>
+                              <p className="text-sm font-mono text-gray-600 font-bold">📞 Teléfono: {cliente.telefono}</p>
+                              <div className="pt-1 flex flex-wrap gap-1 items-center">
+                                 <span className="text-[10px] font-bold text-gray-400 uppercase mr-1">Fechas de compra:</span>
+                                 {Array.from(cliente.fechas).length === 0 ? <span className="text-[9px] text-gray-400 italic">Solo en agenda</span> : Array.from(cliente.fechas).map(f => (
+                                   <span key={f} className="text-[9px] font-bold bg-white border px-1.5 py-0.5 rounded text-gray-500 shadow-sm">{f}</span>
+                                 ))}
+                              </div>
+                           </div>
+                           
+                           <div className="flex gap-4 w-full sm:w-auto border-t sm:border-t-0 pt-2 sm:pt-0 justify-between">
+                              <div className="text-center bg-white px-3 py-1.5 rounded-lg border shadow-sm">
+                                 <span className="block text-[9px] font-black text-gray-400 uppercase tracking-wider">Pedidos</span>
+                                 <span className="text-xl font-black text-gray-800">{cliente.totalPedidos}</span>
+                              </div>
+                              <div className="text-center bg-white px-3 py-1.5 rounded-lg border shadow-sm">
+                                 <span className="block text-[9px] font-black text-gray-400 uppercase tracking-wider">Pollos</span>
+                                 <span className="text-xl font-black text-orange-600">{cliente.totalPollos} kg</span>
+                              </div>
+                           </div>
+                        </div>
+                      );
+                    })
+                  )}
+               </div>
+            </div>
+          </div>
+        )}
+
+        {esPatron && vista === 'historial' && (
+          <div className="bg-white rounded-xl shadow-lg border-t-4 border-gray-800 overflow-hidden">
+            <div className="bg-gray-800 p-4 flex flex-col sm:flex-row justify-between items-center gap-4">
+               <h3 className="font-black text-white text-lg">Historial de Auditoría</h3>
+               <button onClick={exportarExcel} className="bg-green-600 hover:bg-green-700 text-white text-xs px-4 py-3 rounded-lg font-bold flex items-center gap-2 shadow-lg border border-green-500 w-full sm:w-auto justify-center"><Iconos.Download /> EXPORTAR EXCEL (DISEÑO VIP)</button>
+            </div>
+            <div className="divide-y-4 divide-gray-200">
+              {historialDias.length === 0 ? (
+                 <p className="p-6 text-center text-gray-500 font-bold">No hay registros de días anteriores todavía.</p>
+              ) : (
+                historialDias.map(dia => {
+                  const resDia = calcularResumen(dia.ventas, dia.gastos);
+                  const descPaquetesDia = resDia.paquetesDescuento || 0;
+                  const tortillaDia = historialTortillas[dia.fecha.replace(/\//g, '-')] || { dejo: 0, regreso: 0 };
+                  const kgTortillaDia = (tortillaDia.dejo || 0) - (tortillaDia.regreso || 0);
+                  const pTortillaDia = kgTortillaDia * 21;
+                  const pEnviosEfectivoDia = resDia.costoEnvioEfectivo || 0;
+                  
+                  const extrasMontoDia = (resDia.salchichasVendidas * PRECIOS.salchichas) + (resDia.frijolesVendidos * PRECIOS.frijoles);
+
+                  const efectivoNetoFisicoDia = resDia.ingresoEfectivo - resDia.totalGastos - descPaquetesDia - pTortillaDia - pEnviosEfectivoDia - extrasMontoDia;
+
+                  return (
+                    <div key={dia.fecha} className="p-4 sm:p-6 bg-gray-50">
+                      <h4 className="font-black text-xl text-orange-600 mb-4">{dia.fecha}</h4>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                        <div className="bg-white p-3 rounded shadow-sm border border-gray-100 text-center">
+                          <span className="block text-[10px] text-gray-400 uppercase font-bold">Ventas Totales</span>
+                          <span className="block text-lg font-black text-gray-800">${resDia.ventasTotales.toFixed(2)}</span>
+                        </div>
+                        <div className="bg-white p-3 rounded shadow-sm border border-purple-100 text-center">
+                          <span className="block text-[10px] text-gray-400 uppercase font-bold">Transferencias</span>
+                          <span className="block text-lg font-black text-purple-600">${resDia.ingresoTransferencia.toFixed(2)}</span>
+                        </div>
+                        <div className="bg-white p-3 rounded shadow-sm border border-blue-100 text-center">
+                          <span className="block text-[10px] text-gray-400 uppercase font-bold">Pollos Vendidos</span>
+                          <span className="block text-lg font-black text-blue-600">{resDia.pollos}</span>
+                        </div>
+                        
+                        <div className="bg-white p-3 rounded shadow-sm border border-green-100 text-center">
+                          <span className="block text-[10px] text-gray-400 uppercase font-bold">Efectivo Cobrado</span>
+                          <span className="block text-lg font-black text-green-600">${resDia.ingresoEfectivo.toFixed(2)}</span>
+                        </div>
+                        <div className="bg-white p-3 rounded shadow-sm border border-red-100 text-center">
+                          <span className="block text-[10px] text-gray-400 uppercase font-bold">Gastos Físicos</span>
+                          <span className="block text-lg font-black text-red-600">-${resDia.totalGastos.toFixed(2)}</span>
+                        </div>
+                        <div className="bg-white p-3 rounded shadow-sm border border-blue-100 text-center">
+                          <span className="block text-[10px] text-gray-400 uppercase font-bold">Envíos Pagados</span>
+                          <span className="block text-lg font-black text-blue-600">{resDia.cantidadEnvios} (-${pEnviosEfectivoDia} Efc)</span>
+                        </div>
+                        
+                        <div className="col-span-2 sm:col-span-3 bg-pink-50 p-3 rounded shadow-sm border border-pink-200 text-center flex justify-around">
+                          <div>
+                            <span className="block text-[10px] text-pink-700 uppercase font-bold">Salchichas</span>
+                            <span className="block text-lg font-black text-pink-900">{resDia.salchichasVendidas}</span>
+                          </div>
+                          <div>
+                            <span className="block text-[10px] text-orange-700 uppercase font-bold">Frijoles</span>
+                            <span className="block text-lg font-black text-orange-900">{resDia.frijolesVendidos}</span>
+                          </div>
+                        </div>
+
+                        <div className="col-span-2 sm:col-span-3 bg-green-600 p-4 rounded-lg shadow-md text-center text-white mt-2">
+                           <span className="block text-xs uppercase font-bold opacity-80 tracking-widest mb-1">Efectivo Físico Neto</span>
+                           <span className="block text-3xl font-black">${efectivoNetoFisicoDia.toFixed(2)}</span>
+                        </div>
+                      </div>
                     </div>
-                    {esPatron && (
-                      <button onClick={() => eliminarRegistro(g.dbId, g.id, 'gasto')} className="text-red-600 hover:bg-red-200 p-2 rounded"><Iconos.Trash2 /></button>
-                    )}
-                  </div>
-                ))}
-              </div>
+                  );
+                })
+              )}
             </div>
           </div>
         )}
-
-        {/* VISTA CIERRE / STOCK */}
-        {vista === 'cierre' && esPatron && (
-          <div className="space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="bg-white p-5 rounded-xl shadow border border-l-4 border-l-blue-500">
-                <h3 className="font-black text-gray-700 mb-2">Stock Actual Pollos</h3>
-                <p className="text-3xl font-black text-blue-600">{stockPollos.toFixed(1)} <span className="text-sm font-normal text-gray-500">piezas</span></p>
-                <form onSubmit={agregarStockPollo} className="mt-3 flex gap-2">
-                  <input type="number" value={ingresoPollo} onChange={(e) => setIngresoPollo(e.target.value)} placeholder="Entrada hoy" className="w-full p-2 border rounded font-bold text-sm" />
-                  <button type="submit" className="bg-blue-600 text-white px-4 rounded font-bold text-sm">Entrada</button>
-                </form>
-                <form onSubmit={restarMermaPollo} className="mt-2 flex gap-2">
-                  <input type="number" value={mermaPollo} onChange={(e) => setMermaPollo(e.target.value)} placeholder="Merma" className="w-full p-2 border rounded font-bold text-sm" />
-                  <button type="submit" className="bg-red-600 text-white px-4 rounded font-bold text-sm">Merma</button>
-                </form>
-              </div>
-
-              <div className="bg-white p-5 rounded-xl shadow border border-l-4 border-l-green-500">
-                <h3 className="font-black text-gray-700 mb-2">Stock Actual Refrescos</h3>
-                <p className="text-3xl font-black text-green-600">{stockRefrescos} <span className="text-sm font-normal text-gray-500">piezas</span></p>
-                <form onSubmit={agregarStockRefresco} className="mt-3 flex gap-2">
-                  <input type="number" value={ingresoRefresco} onChange={(e) => setIngresoRefresco(e.target.value)} placeholder="Entrada hoy" className="w-full p-2 border rounded font-bold text-sm" />
-                  <button type="submit" className="bg-green-600 text-white px-4 rounded font-bold text-sm">Entrada</button>
-                </form>
-                <form onSubmit={restarMermaRefresco} className="mt-2 flex gap-2">
-                  <input type="number" value={mermaRefresco} onChange={(e) => setMermaRefresco(e.target.value)} placeholder="Merma" className="w-full p-2 border rounded font-bold text-sm" />
-                  <button type="submit" className="bg-red-600 text-white px-4 rounded font-bold text-sm">Merma</button>
-                </form>
-              </div>
-            </div>
-
-            <div className="bg-white p-6 rounded-xl shadow border space-y-4">
-              <h3 className="font-black text-lg text-gray-800 border-b pb-2">Control de Tortillas (Proveedor)</h3>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <div>
-                  <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Kg Dejados</label>
-                  <input type="number" value={tortillaProv.dejo || ''} onChange={(e) => actualizarTortillaProv('dejo', e.target.value)} placeholder="0" className="w-full p-2 border rounded font-bold" />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Kg Regresados</label>
-                  <input type="number" value={tortillaProv.regreso || ''} onChange={(e) => actualizarTortillaProv('regreso', e.target.value)} placeholder="0" className="w-full p-2 border rounded font-bold" />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Pago Proveedor ($21/kg)</label>
-                  <p className="text-xl font-black text-orange-600 p-2">${pTortillaProveedor.toFixed(2)}</p>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* VISTA UTILIDAD */}
-        {vista === 'utilidad' && esPatron && (
-          <div className="space-y-6">
-            <div className="bg-white p-6 rounded-xl shadow border space-y-4">
-              <h2 className="text-xl font-black text-gray-800 border-b pb-2 flex justify-between items-center">
-                <span>Resumen Financiero - Hoy ({hoyStr})</span>
-                <button onClick={exportarExcel} className="bg-green-700 text-white px-4 py-2 rounded-lg font-bold text-sm flex items-center gap-2"><Iconos.Download /> Exportar Excel</button>
-              </h2>
-
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <div className="bg-gray-50 p-4 rounded-lg border">
-                  <span className="block text-xs font-bold text-gray-500 uppercase">Ventas Brutas</span>
-                  <span className="text-2xl font-black text-gray-800">${resHoy.ventasTotales.toFixed(2)}</span>
-                </div>
-                <div className="bg-green-50 p-4 rounded-lg border border-green-200">
-                  <span className="block text-xs font-bold text-green-700 uppercase">Efectivo Cobrado</span>
-                  <span className="text-2xl font-black text-green-700">${resHoy.ingresoEfectivo.toFixed(2)}</span>
-                </div>
-                <div className="bg-purple-50 p-4 rounded-lg border border-purple-200">
-                  <span className="block text-xs font-bold text-purple-700 uppercase">Transferencias</span>
-                  <span className="text-2xl font-black text-purple-700">${resHoy.ingresoTransferencia.toFixed(2)}</span>
-                </div>
-              </div>
-
-              <div className="bg-amber-50 border border-amber-200 p-4 rounded-xl space-y-2">
-                <h3 className="font-bold text-amber-900 border-b border-amber-200 pb-1">Corte Neto Físico en Caja</h3>
-                <div className="flex justify-between text-sm text-amber-800"><span>Efectivo Cobrado:</span><span>${resHoy.ingresoEfectivo.toFixed(2)}</span></div>
-                <div className="flex justify-between text-sm text-red-600"><span>Gastos Físicos:</span><span>-${resHoy.totalGastos.toFixed(2)}</span></div>
-                <div className="flex justify-between text-sm text-red-600"><span>Tortillería:</span><span>-${pTortillaProveedor.toFixed(2)}</span></div>
-                <div className="flex justify-between text-sm text-red-600"><span>Retiro Extras:</span><span>-${totalRetiroExtras.toFixed(2)}</span></div>
-                <div className="flex justify-between text-base font-black text-amber-950 border-t pt-1"><span>Efectivo Neto a Entregar:</span><span>${corteNetoFisicoHoy.toFixed(2)}</span></div>
-              </div>
-
-              <div className="bg-green-900 text-white p-5 rounded-xl space-y-3">
-                <h3 className="font-black text-orange-400 text-lg border-b border-gray-700 pb-1">Utilidad Libre Real</h3>
-                <div className="flex justify-between text-sm"><span>Ventas Reales:</span><span className="font-bold">${ventasNetasReales.toFixed(2)}</span></div>
-                <div className="flex justify-between text-sm text-red-300"><span>Costo Pollo (${costoPolloUnidad}/u):</span><span>-${costoTotalProduccion.toFixed(2)}</span></div>
-                <div className="flex justify-between text-xl font-black text-green-400 border-t border-gray-700 pt-2"><span>Ganancia Neta:</span><span>${utilidadRealHoy.toFixed(2)}</span></div>
-                <div className="flex justify-between text-sm text-yellow-300 border-t border-gray-800 pt-1"><span>Diezmo Sugerido (10%):</span><span>${diezmoSugerido.toFixed(2)}</span></div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* VISTA VIP */}
-        {vista === 'vip' && esPatron && (
-          <div className="space-y-6">
-            <div className="bg-white p-6 rounded-xl shadow border">
-              <h2 className="text-xl font-bold mb-4 flex items-center gap-2 text-orange-600"><Iconos.Star /> Clientes VIP</h2>
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-sm">
-                  <thead className="bg-gray-100 font-bold border-b">
-                    <tr>
-                      <th className="p-2">Cliente</th>
-                      <th className="p-2">Teléfono</th>
-                      <th className="p-2">Pollos Comprados</th>
-                      <th className="p-2">Pedidos</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {clientesVIP.map((c, idx) => (
-                      <tr key={idx} className="border-b hover:bg-gray-50">
-                        <td className="p-2 font-bold">{c.nombre}</td>
-                        <td className="p-2">{c.telefono}</td>
-                        <td className="p-2 font-bold text-orange-600">{c.totalPollos}</td>
-                        <td className="p-2">{c.totalPedidos}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* VISTA HISTORIAL */}
-        {vista === 'historial' && esPatron && (
-          <div className="space-y-6">
-            <div className="bg-white p-6 rounded-xl shadow border">
-              <h2 className="text-xl font-bold mb-4 flex items-center gap-2"><Iconos.CalendarDays /> Historial de Ventas</h2>
-              <div className="space-y-4 max-h-[600px] overflow-y-auto">
-                {ventas.map(v => (
-                  <div key={v.dbId} className="p-4 border rounded-lg bg-gray-50 flex justify-between items-center">
-                    <div>
-                      <span className="font-bold block text-gray-800">{v.fechaDia} - {v.hora} ({v.tipo.toUpperCase()})</span>
-                      <span className="text-xs text-gray-600 block">{v.nombreCliente} {v.telefono}</span>
-                      <span className="text-xs font-bold text-orange-600">${v.total.toFixed(2)} ({v.metodoPago})</span>
-                    </div>
-                    <button onClick={() => eliminarRegistro(v.dbId, v.id, 'venta')} className="text-red-600 p-2 hover:bg-red-100 rounded"><Iconos.Trash2 /></button>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        )}
-
       </main>
     </div>
   );
 }
+
+// 7. Renderizamos la aplicación en el DOM
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(<App />);
