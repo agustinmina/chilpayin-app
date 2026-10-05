@@ -29,13 +29,11 @@ const db = firebase.firestore();
 // 4. Precios y equivalencias ACTUALIZADOS
 const PRECIOS = { 
   asado: 150,
-  sabor: 155, // Chiltepín, Enchipotlado, Encebollado
-  mitad: 80,
+  sabor: 150, // Chiltepín, Enchipotlado, Encebollado, Crujiente (AHORA EN $150)
+  mitad: 80,  // Mitades en $80
   paquete15Asado: 250,      
-  paquete15Sabor: 255,      
   paquete2Asados: 320,      
-  paquete2Sabores: 325,     
-  paqueteFamiliar: 295, // PRECIO ACTUALIZADO
+  paqueteFamiliar: 295, 
   tortillaMedio: 12,
   tortillaKilo: 24,
   refresco: 30,
@@ -44,9 +42,9 @@ const PRECIOS = {
 };
 
 const EQUIVALENCIA_POLLOS = { 
-  entero: 1, chiltepin: 1, enchipotlado: 1, encebollado: 1,
-  mitad: 0.5, 
-  paquete15: 1.5, paqSaborMedio: 1.5, paquete2: 2, paq2Sabores: 2,
+  entero: 1, chiltepin: 1, enchipotlado: 1, encebollado: 1, crujienteEntero: 1,
+  mitad: 0.5, crujienteMitad: 0.5,
+  paquete15: 1.5, paquete2: 2,
   paqueteFamiliar: 1.5 
 };
 
@@ -103,10 +101,11 @@ function App() {
 
   const [orden, setOrden] = useState({ 
     entero: 0, chiltepin: 0, enchipotlado: 0, encebollado: 0, mitad: 0,
-    paquete15: 0, paqSaborMedio: 0, paquete2: 0, paq2Sabores: 0, paqueteFamiliar: 0,
+    crujienteEntero: 0, crujienteMitad: 0,
+    paquete15: 0, paquete2: 0, paqueteFamiliar: 0,
     costillasMonto: '', extraManual: '',
     tortillaMedio: 0, tortillaKilo: 0, refresco: 0, salchichas: 0, frijoles: 0,
-    domicilio: '', notasEnvio: '', metodoPago: 'efectivo',
+    domicilio: '', notasEnvio: '', metodoPago: 'efectivo', montoEfectivoMixto: '',
     telefono: '', nombreCliente: ''
   });
   
@@ -197,7 +196,7 @@ function App() {
 
   const handleOrdenChange = (e) => {
     const { name, value } = e.target;
-    if (['notasEnvio', 'metodoPago', 'nombreCliente', 'domicilio', 'costillasMonto', 'extraManual'].includes(name)) {
+    if (['notasEnvio', 'metodoPago', 'nombreCliente', 'domicilio', 'costillasMonto', 'extraManual', 'montoEfectivoMixto'].includes(name)) {
       setOrden(prev => ({ ...prev, [name]: value }));
     } else if (name !== 'telefono') {
       setOrden(prev => ({ ...prev, [name]: value === '' ? 0 : Math.max(0, parseInt(value) || 0) }));
@@ -294,10 +293,12 @@ function App() {
     (Number(orden.encebollado) || 0) * PRECIOS.sabor +
     (Number(orden.mitad) || 0) * PRECIOS.mitad +
     (Number(orden.paquete15) || 0) * PRECIOS.paquete15Asado +
-    (Number(orden.paqSaborMedio) || 0) * PRECIOS.paquete15Sabor +
     (Number(orden.paquete2) || 0) * PRECIOS.paquete2Asados +
-    (Number(orden.paq2Sabores) || 0) * PRECIOS.paquete2Sabores +
     (Number(orden.paqueteFamiliar) || 0) * PRECIOS.paqueteFamiliar;
+
+  const subtotalCrujiente = 
+    (Number(orden.crujienteEntero) || 0) * PRECIOS.sabor +
+    (Number(orden.crujienteMitad) || 0) * PRECIOS.mitad;
 
   const subtotalCostillas = Number(orden.costillasMonto) || 0;
   const extraManualMonto = Number(orden.extraManual) || 0;
@@ -310,25 +311,23 @@ function App() {
     (Number(orden.frijoles) || 0) * PRECIOS.frijoles;
 
   const costoEnvio = Number(orden.domicilio) || 0;
-  const totalOrden = subtotalPollo + subtotalCostillas + subtotalComplementos + extraManualMonto + costoEnvio;
+  const totalOrden = subtotalPollo + subtotalCrujiente + subtotalCostillas + subtotalComplementos + extraManualMonto + costoEnvio;
 
   const pollosOrden = 
     (Number(orden.entero) || 0) * 1 +
     (Number(orden.chiltepin) || 0) * 1 +
     (Number(orden.enchipotlado) || 0) * 1 +
     (Number(orden.encebollado) || 0) * 1 +
+    (Number(orden.crujienteEntero) || 0) * 1 +
     (Number(orden.mitad) || 0) * 0.5 +
+    (Number(orden.crujienteMitad) || 0) * 0.5 +
     (Number(orden.paquete15) || 0) * 1.5 +
-    (Number(orden.paqSaborMedio) || 0) * 1.5 +
     (Number(orden.paquete2) || 0) * 2 +
-    (Number(orden.paq2Sabores) || 0) * 2 +
     (Number(orden.paqueteFamiliar) || 0) * 1.5;
 
   const refrescosEnPaquetes = 
     (Number(orden.paquete15) || 0) + 
-    (Number(orden.paqSaborMedio) || 0) + 
     (Number(orden.paquete2) || 0) + 
-    (Number(orden.paq2Sabores) || 0) + 
     (Number(orden.paqueteFamiliar) || 0);
 
   const refrescosOrden = (Number(orden.refresco) || 0) + refrescosEnPaquetes;
@@ -338,12 +337,28 @@ function App() {
     if (totalOrden === 0 && costoEnvio === 0) return setModalAlerta({ visible: true, mensaje: "La orden está en ceros." });
     if (tipo === 'domicilio' && !orden.telefono) return setModalAlerta({ visible: true, mensaje: "Ingresa el teléfono del cliente." });
 
+    let efectivoFinal = 0;
+    let transferenciaFinal = 0;
+
+    if (orden.metodoPago === 'efectivo') {
+      efectivoFinal = totalOrden;
+    } else if (orden.metodoPago === 'transferencia') {
+      transferenciaFinal = totalOrden;
+    } else if (orden.metodoPago === 'mixto') {
+      efectivoFinal = Number(orden.montoEfectivoMixto) || 0;
+      if (efectivoFinal <= 0 || efectivoFinal >= totalOrden) {
+         return setModalAlerta({ visible: true, mensaje: "En pago mixto, el efectivo debe ser mayor a 0 y menor al total." });
+      }
+      transferenciaFinal = totalOrden - efectivoFinal;
+    }
+
     const nuevaVenta = {
-      id: Date.now(), tipo, fechaDia: diaSeleccionado, // Usamos la fecha de la Máquina del Tiempo
+      id: Date.now(), tipo, fechaDia: diaSeleccionado, 
       hora: new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}),
       detalles: { ...orden, extraManual: extraManualMonto, costillasMonto: subtotalCostillas }, 
-      subtotalPollo, subtotalCostillas, subtotalComplementos, extraManual: extraManualMonto, costoEnvio,
-      total: totalOrden, pollosTotales: pollosOrden, refrescosTotales: refrescosOrden, metodoPago: orden.metodoPago,
+      subtotalPollo, subtotalCrujiente, subtotalCostillas, subtotalComplementos, extraManual: extraManualMonto, costoEnvio,
+      total: totalOrden, pollosTotales: pollosOrden, refrescosTotales: refrescosOrden, 
+      metodoPago: orden.metodoPago, montoEfectivo: efectivoFinal, montoTransferencia: transferenciaFinal,
       telefono: orden.telefono || '', nombreCliente: orden.nombreCliente || '', notasEnvio: orden.notasEnvio || ''
     };
 
@@ -353,7 +368,6 @@ function App() {
       }
       await db.collection('ventas').add(nuevaVenta);
       
-      // Solo descontar stock si estamos operando en el día actual (evita descuadrar inventario si agregamos una venta de ayer)
       if (diaSeleccionado === new Date().toLocaleDateString('es-MX')) {
         await db.collection('config').doc('stock').set({ 
           pollos: firebase.firestore.FieldValue.increment(-pollosOrden), 
@@ -363,10 +377,11 @@ function App() {
 
       setOrden({ 
         entero: 0, chiltepin: 0, enchipotlado: 0, encebollado: 0, mitad: 0, 
-        paquete15: 0, paqSaborMedio: 0, paquete2: 0, paq2Sabores: 0, paqueteFamiliar: 0,
+        crujienteEntero: 0, crujienteMitad: 0,
+        paquete15: 0, paquete2: 0, paqueteFamiliar: 0,
         costillasMonto: '', extraManual: '',
         tortillaMedio: 0, tortillaKilo: 0, refresco: 0, salchichas: 0, frijoles: 0, 
-        domicilio: '', notasEnvio: '', metodoPago: 'efectivo', telefono: '', nombreCliente: '' 
+        domicilio: '', notasEnvio: '', metodoPago: 'efectivo', montoEfectivoMixto: '', telefono: '', nombreCliente: '' 
       });
       setBusquedaTelefonos([]); setBusquedaNombres([]); setMostrarSugerencias(false); setMostrarSugerenciasNombre(false);
     } catch (error) { setModalAlerta({ visible: true, mensaje: "Error al registrar la venta." }); }
@@ -389,7 +404,6 @@ function App() {
           const v = ventas.find(v => v.id === idOriginal);
           if (v) {
             await db.collection('ventas').doc(dbId).delete();
-            // Restaurar stock solo si la venta eliminada es de hoy
             if (v.fechaDia === new Date().toLocaleDateString('es-MX')) {
               await db.collection('config').doc('stock').set({ 
                 pollos: firebase.firestore.FieldValue.increment(v.pollosTotales || 0), 
@@ -407,11 +421,19 @@ function App() {
     return listaVentas.reduce((acc, v) => {
       let det = v.detalles || {};
       acc.ventasTotales += v.total || 0;
-      acc.ingresoEfectivo += v.metodoPago === 'efectivo' ? (v.total || 0) : 0;
-      acc.ingresoTransferencia += v.metodoPago === 'transferencia' ? (v.total || 0) : 0;
+      
+      // LOGICA DE INGRESOS ACTUALIZADA PARA PAGO MIXTO
+      if (v.metodoPago === 'mixto') {
+         acc.ingresoEfectivo += v.montoEfectivo || 0;
+         acc.ingresoTransferencia += v.montoTransferencia || 0;
+      } else {
+         acc.ingresoEfectivo += v.metodoPago === 'efectivo' ? (v.total || 0) : 0;
+         acc.ingresoTransferencia += v.metodoPago === 'transferencia' ? (v.total || 0) : 0;
+      }
+
       acc.pollos += v.pollosTotales || 0;
       
-      const refPaq = (det.refresco || 0) + (det.paquete15 || 0) + (det.paqSaborMedio || 0) + (det.paquete2 || 0) + (det.paq2Sabores || 0) + (det.paqueteFamiliar || 0);
+      const refPaq = (det.refresco || 0) + (det.paquete15 || 0) + (det.paquete2 || 0) + (det.paqueteFamiliar || 0);
       acc.refrescosVendidos += refPaq;
       
       acc.costillasVendido += Number(det.costillasMonto) || 0;
@@ -419,12 +441,16 @@ function App() {
       acc.frijolesVendidos += (det.frijoles || 0) + (det.paqueteFamiliar || 0);
       acc.extrasManualesTotales += Number(det.extraManual) || 0;
 
-      acc.paquetesDescuento += (det.paquete15 || 0)*20 + (det.paqSaborMedio || 0)*20 + (det.paquete2 || 0)*20 + (det.paq2Sabores || 0)*20 + (det.paqueteFamiliar || 0)*15;
+      acc.crujientesReales += (det.crujienteEntero || 0) + (det.crujienteMitad || 0)*0.5;
+      
+      // DESCUENTOS FANTASMAS (Para cuadrar refrescos en utilidad)
+      acc.paquetesDescuento += (det.paquete15 || 0)*20 + (det.paquete2 || 0)*20 + (det.paqueteFamiliar || 0)*15;
       
       if (v.tipo === 'domicilio') {
           acc.cantidadEnvios += 1;
           if (v.metodoPago === 'efectivo') acc.costoEnvioEfectivo += (v.costoEnvio || 0);
-          else acc.costoEnvioTransferencia += (v.costoEnvio || 0);
+          else if (v.metodoPago === 'transferencia') acc.costoEnvioTransferencia += (v.costoEnvio || 0);
+          else if (v.metodoPago === 'mixto') acc.costoEnvioEfectivo += (v.costoEnvio || 0); // En mixto asumimos que el envío se ampara en el total efectivo cobrado
       }
       return acc;
     }, { 
@@ -609,10 +635,12 @@ function App() {
                 <h3 className="text-sm font-black text-orange-600 uppercase tracking-wider border-b pb-1">Pollos y Sabores</h3>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   <ProductoInput nombre="Pollo Asado" desc="$150" name="entero" value={orden.entero} onChange={handleOrdenChange} />
-                  <ProductoInput nombre="Chiltepín" desc="$155" name="chiltepin" value={orden.chiltepin} onChange={handleOrdenChange} />
-                  <ProductoInput nombre="Enchipotlado" desc="$155" name="enchipotlado" value={orden.enchipotlado} onChange={handleOrdenChange} />
-                  <ProductoInput nombre="Encebollado" desc="$155" name="encebollado" value={orden.encebollado} onChange={handleOrdenChange} />
+                  <ProductoInput nombre="Chiltepín" desc="$150" name="chiltepin" value={orden.chiltepin} onChange={handleOrdenChange} />
+                  <ProductoInput nombre="Enchipotlado" desc="$150" name="enchipotlado" value={orden.enchipotlado} onChange={handleOrdenChange} />
+                  <ProductoInput nombre="Encebollado" desc="$150" name="encebollado" value={orden.encebollado} onChange={handleOrdenChange} />
+                  <ProductoInput nombre="Crujiente Entero" desc="$150" name="crujienteEntero" value={orden.crujienteEntero} onChange={handleOrdenChange} />
                   <ProductoInput nombre="Mitad Asado" desc="$80" name="mitad" value={orden.mitad} onChange={handleOrdenChange} />
+                  <ProductoInput nombre="Crujiente Mitad" desc="$80" name="crujienteMitad" value={orden.crujienteMitad} onChange={handleOrdenChange} />
                 </div>
               </div>
 
@@ -621,9 +649,7 @@ function App() {
                 <h3 className="text-sm font-black text-amber-600 uppercase tracking-wider border-b pb-1">Paquetes Especiales</h3>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   <ProductoInput nombre="Paquete Asado (1.5)" desc="$250" name="paquete15" value={orden.paquete15} onChange={handleOrdenChange} />
-                  <ProductoInput nombre="Paq. Sabor + 1/2 Asado" desc="$255" name="paqSaborMedio" value={orden.paqSaborMedio} onChange={handleOrdenChange} />
                   <ProductoInput nombre="Paq. 2 Pollos Asados" desc="$320" name="paquete2" value={orden.paquete2} onChange={handleOrdenChange} />
-                  <ProductoInput nombre="Paq. 2 P. (1 Asado + 1 Sabor)" desc="$325" name="paq2Sabores" value={orden.paq2Sabores} onChange={handleOrdenChange} />
                   <ProductoInput nombre="Paquete Familiar" desc="$295" name="paqueteFamiliar" value={orden.paqueteFamiliar} onChange={handleOrdenChange} />
                 </div>
               </div>
@@ -711,6 +737,7 @@ function App() {
 
                 <div className="space-y-1 text-sm text-gray-600 border-b pb-3">
                   <div className="flex justify-between"><span>Pollos:</span><span className="font-bold">${subtotalPollo.toFixed(2)}</span></div>
+                  <div className="flex justify-between"><span>Crujiente:</span><span className="font-bold">${subtotalCrujiente.toFixed(2)}</span></div>
                   {subtotalCostillas > 0 && <div className="flex justify-between text-orange-800 font-bold"><span>Costillas:</span><span>+${subtotalCostillas.toFixed(2)}</span></div>}
                   <div className="flex justify-between"><span>Complementos:</span><span className="font-bold">${subtotalComplementos.toFixed(2)}</span></div>
                   {extraManualMonto > 0 && <div className="flex justify-between text-orange-600 font-bold"><span>Extras (Manual):</span><span>+${extraManualMonto.toFixed(2)}</span></div>}
@@ -719,14 +746,37 @@ function App() {
 
                 <div className="space-y-2">
                   <label className="block text-xs font-black text-gray-500 uppercase">Método de Pago</label>
-                  <div className="grid grid-cols-2 gap-2">
-                    <button type="button" onClick={() => setOrden(prev => ({ ...prev, metodoPago: 'efectivo' }))} className={`py-2 rounded-lg font-bold text-sm flex items-center justify-center gap-1 ${orden.metodoPago === 'efectivo' ? 'bg-green-600 text-white shadow' : 'bg-gray-100 text-gray-700'}`}>
-                      <Iconos.Banknote /> Efectivo
+                  <div className="grid grid-cols-3 gap-2">
+                    <button type="button" onClick={() => setOrden({...orden, metodoPago: 'efectivo'})} className={`py-2 flex items-center justify-center gap-1 rounded border-2 font-bold text-xs sm:text-sm ${orden.metodoPago === 'efectivo' ? 'bg-green-100 border-green-500 text-green-700 shadow' : 'bg-gray-50 text-gray-400'}`}>
+                      <Iconos.Banknote /> Efc
                     </button>
-                    <button type="button" onClick={() => setOrden(prev => ({ ...prev, metodoPago: 'transferencia' }))} className={`py-2 rounded-lg font-bold text-sm flex items-center justify-center gap-1 ${orden.metodoPago === 'transferencia' ? 'bg-purple-600 text-white shadow' : 'bg-gray-100 text-gray-700'}`}>
-                      <Iconos.CreditCard /> Transferencia
+                    <button type="button" onClick={() => setOrden({...orden, metodoPago: 'transferencia'})} className={`py-2 flex items-center justify-center gap-1 rounded border-2 font-bold text-xs sm:text-sm ${orden.metodoPago === 'transferencia' ? 'bg-purple-100 border-purple-500 text-purple-700 shadow' : 'bg-gray-50 text-gray-400'}`}>
+                      <Iconos.CreditCard /> Trans
+                    </button>
+                    <button type="button" onClick={() => setOrden({...orden, metodoPago: 'mixto'})} className={`py-2 flex items-center justify-center gap-1 rounded border-2 font-bold text-xs sm:text-sm ${orden.metodoPago === 'mixto' ? 'bg-blue-100 border-blue-500 text-blue-700 shadow' : 'bg-gray-50 text-gray-400'}`}>
+                      <Iconos.Calculator /> Mixto
                     </button>
                   </div>
+                  
+                  {/* INPUT PAGO MIXTO */}
+                  {orden.metodoPago === 'mixto' && (
+                    <div className="mt-3 bg-blue-50 p-3 rounded-lg border border-blue-200">
+                       <label className="block text-xs font-black text-blue-800 uppercase mb-1">Monto recibido en Efectivo ($)</label>
+                       <input 
+                          type="number" 
+                          name="montoEfectivoMixto" 
+                          value={orden.montoEfectivoMixto} 
+                          onChange={handleOrdenChange} 
+                          className="w-full p-2 border rounded font-bold outline-none focus:border-blue-500" 
+                          placeholder="Ej. 150" 
+                       />
+                       {Number(orden.montoEfectivoMixto) > 0 && Number(orden.montoEfectivoMixto) < totalOrden && (
+                         <p className="text-xs font-bold text-blue-600 mt-1">
+                           Se registrarán ${(totalOrden - Number(orden.montoEfectivoMixto)).toFixed(2)} como Transferencia.
+                         </p>
+                       )}
+                    </div>
+                  )}
                 </div>
 
                 <button 
@@ -762,7 +812,13 @@ function App() {
                           <div className="flex-1">
                             <div className="flex items-center gap-2 mb-1">
                               <span className="text-xs font-bold bg-gray-200 text-gray-700 px-2 py-0.5 rounded">{v.hora}</span>
-                              <span className={`text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded ${v.metodoPago === 'efectivo' ? 'bg-green-100 text-green-700' : 'bg-purple-100 text-purple-700'}`}>{v.metodoPago}</span>
+                              <span className={`text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded ${
+                                v.metodoPago === 'efectivo' ? 'bg-green-100 text-green-700' : 
+                                v.metodoPago === 'transferencia' ? 'bg-purple-100 text-purple-700' : 
+                                'bg-blue-100 text-blue-700'
+                              }`}>
+                                {v.metodoPago === 'mixto' ? `Mixto ($${v.montoEfectivo} Ef / $${v.montoTransferencia} Tr)` : v.metodoPago}
+                              </span>
                               {v.tipo === 'domicilio' && <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded bg-blue-100 text-blue-700">Envío</span>}
                             </div>
                             {v.nombreCliente && (
@@ -773,11 +829,11 @@ function App() {
                               {det.chiltepin > 0 && `${det.chiltepin} Chiltepin `}
                               {det.enchipotlado > 0 && `${det.enchipotlado} Enchipotlado `}
                               {det.encebollado > 0 && `${det.encebollado} Encebollado `}
+                              {det.crujienteEntero > 0 && `${det.crujienteEntero} Cruj(Ent) `}
                               {det.mitad > 0 && `${det.mitad} Asad(Mit) `}
+                              {det.crujienteMitad > 0 && `${det.crujienteMitad} Cruj(Mit) `}
                               {det.paquete15 > 0 && `${det.paquete15} AsadPq(1.5) `}
-                              {det.paqSaborMedio > 0 && `${det.paqSaborMedio} Pq(Sabor+Med) `}
                               {det.paquete2 > 0 && `${det.paquete2} AsadPq(2) `}
-                              {det.paq2Sabores > 0 && `${det.paq2Sabores} Pq(Asad+Sabor) `}
                               {det.paqueteFamiliar > 0 && `${det.paqueteFamiliar} Paq.Familiar `}
                               {Number(det.costillasMonto) > 0 && `Costillas($${det.costillasMonto}) `}
                               {det.tortillaMedio > 0 && `${det.tortillaMedio} Tort(½) `}
