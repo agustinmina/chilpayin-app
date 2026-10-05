@@ -29,14 +29,13 @@ const db = firebase.firestore();
 // 4. Precios y equivalencias ACTUALIZADOS
 const PRECIOS = { 
   asado: 150,
-  sabor: 155, // Chiltepín, Enchipotlado, Encebollado, Crujiente
+  sabor: 155, // Chiltepín, Enchipotlado, Encebollado
   mitad: 80,
-  paquete15Asado: 250,      // Paquete 1.5 Asado
-  paquete15Sabor: 255,      // Paquete 1 Sabor + 1/2 Asado
-  paquete2Asados: 320,      // Paquete 2 Pollos Asados
-  paquete2Sabores: 325,     // Paquete 2 Pollos (1 Asado + 1 Sabor)
-  mixto: 150,
-  paqueteFamiliar: 290,
+  paquete15Asado: 250,      
+  paquete15Sabor: 255,      
+  paquete2Asados: 320,      
+  paquete2Sabores: 325,     
+  paqueteFamiliar: 295, // PRECIO ACTUALIZADO
   tortillaMedio: 12,
   tortillaKilo: 24,
   refresco: 30,
@@ -45,15 +44,21 @@ const PRECIOS = {
 };
 
 const EQUIVALENCIA_POLLOS = { 
-  entero: 1, chiltepin: 1, enchipotlado: 1, encebollado: 1, crujienteEntero: 1,
-  mitad: 0.5, crujienteMitad: 0.5,
+  entero: 1, chiltepin: 1, enchipotlado: 1, encebollado: 1,
+  mitad: 0.5, 
   paquete15: 1.5, paqSaborMedio: 1.5, paquete2: 2, paq2Sabores: 2,
-  mixto: 1, paqueteFamiliar: 1.5 
+  paqueteFamiliar: 1.5 
 };
 
 const PIN_PATRON = "1234";
 
-// 5. Componente de diseño para productos
+// Funciones para manejo seguro de fechas locales
+const getLocalYYYYMMDD = () => {
+  const d = new Date();
+  return new Date(d.getTime() - (d.getTimezoneOffset() * 60000)).toISOString().split('T')[0];
+};
+
+// 5. Componentes de diseño
 const ProductoInput = ({ nombre, desc, name, value, onChange }) => (
   <div className="flex justify-between items-center bg-white border border-gray-200 p-2 rounded shadow-sm">
     <div>
@@ -68,10 +73,28 @@ const ProductoInput = ({ nombre, desc, name, value, onChange }) => (
   </div>
 );
 
+const MontoInput = ({ nombre, desc, name, value, onChange }) => (
+  <div className="flex justify-between items-center bg-orange-50 border border-orange-200 p-2 rounded shadow-sm">
+    <div>
+      <span className="block font-black text-orange-800 text-sm">{nombre}</span>
+      <span className="block text-xs text-orange-600 font-bold">{desc}</span>
+    </div>
+    <div className="flex items-center gap-1">
+      <span className="font-bold text-gray-600">$</span>
+      <input type="number" name={name} value={value} onChange={onChange} min="0" step="0.5" className="w-20 text-center border rounded-lg font-black text-lg bg-white outline-none focus:ring-2 focus:ring-orange-500 p-1" placeholder="0.00" />
+    </div>
+  </div>
+);
+
 // 6. LA APLICACIÓN PRINCIPAL
 function App() {
   const [vista, setVista] = useState('local');
   const [esPatron, setEsPatron] = useState(false);
+
+  // MÁQUINA DEL TIEMPO (Selector de Fecha)
+  const [fechaOperacion, setFechaOperacion] = useState(getLocalYYYYMMDD());
+  const [yyyy, mm, dd] = fechaOperacion.split('-');
+  const diaSeleccionado = `${dd}/${mm}/${yyyy}`; // DD/MM/YYYY
 
   const [modalAlerta, setModalAlerta] = useState({ visible: false, mensaje: '' });
   const [modalConfirmacion, setModalConfirmacion] = useState({ visible: false, mensaje: '', action: null });
@@ -80,15 +103,13 @@ function App() {
 
   const [orden, setOrden] = useState({ 
     entero: 0, chiltepin: 0, enchipotlado: 0, encebollado: 0, mitad: 0,
-    crujienteEntero: 0, crujienteMitad: 0, 
-    paquete15: 0, paqSaborMedio: 0, paquete2: 0, paq2Sabores: 0, mixto: 0, paqueteFamiliar: 0,
-    extraManual: '',
+    paquete15: 0, paqSaborMedio: 0, paquete2: 0, paq2Sabores: 0, paqueteFamiliar: 0,
+    costillasMonto: '', extraManual: '',
     tortillaMedio: 0, tortillaKilo: 0, refresco: 0, salchichas: 0, frijoles: 0,
     domicilio: '', notasEnvio: '', metodoPago: 'efectivo',
     telefono: '', nombreCliente: ''
   });
   
-  // Estados para autocompletado de clientes
   const [busquedaTelefonos, setBusquedaTelefonos] = useState([]);
   const [mostrarSugerencias, setMostrarSugerencias] = useState(false);
   const [busquedaNombres, setBusquedaNombres] = useState([]);
@@ -107,115 +128,77 @@ function App() {
   const [entradasHoy, setEntradasHoy] = useState({ pollos: 0, refrescos: 0 });
   const [costoPolloUnidad, setCostoPolloUnidad] = useState(72); 
   
-  const hoyStr = new Date().toLocaleDateString('es-MX');
-
   const [ventas, setVentas] = useState([]);
   const [gastos, setGastos] = useState([]);
   const [historialTortillas, setHistorialTortillas] = useState({});
-  
   const [stockPollos, setStockPollos] = useState(0);
   const [stockRefrescos, setStockRefrescos] = useState(0);
 
+  // Efectos Globales
   useEffect(() => {
-    const unsubVentas = db.collection('ventas').onSnapshot((snap) => {
-      const v = snap.docs.map(d => ({ dbId: d.id, ...d.data() }));
-      setVentas(v.sort((a, b) => b.id - a.id));
+    const unsubVentas = db.collection('ventas').onSnapshot(snap => {
+      setVentas(snap.docs.map(d => ({ dbId: d.id, ...d.data() })).sort((a, b) => b.id - a.id));
     });
-
-    const unsubGastos = db.collection('gastos').onSnapshot((snap) => {
-      const g = snap.docs.map(d => ({ dbId: d.id, ...d.data() }));
-      setGastos(g.sort((a, b) => b.id - a.id));
+    const unsubGastos = db.collection('gastos').onSnapshot(snap => {
+      setGastos(snap.docs.map(d => ({ dbId: d.id, ...d.data() })).sort((a, b) => b.id - a.id));
     });
-
-    const unsubClientes = db.collection('clientes').onSnapshot((snap) => {
-      const c = snap.docs.map(d => d.data());
-      setClientesAgenda(c);
+    const unsubClientes = db.collection('clientes').onSnapshot(snap => {
+      setClientesAgenda(snap.docs.map(d => d.data()));
     });
-
-    const unsubStock = db.collection('config').doc('stock').onSnapshot((docSnap) => {
-      if (docSnap.exists) {
-        setStockPollos(docSnap.data().pollos || 0);
-        setStockRefrescos(docSnap.data().refrescos || 0);
-      }
+    const unsubStock = db.collection('config').doc('stock').onSnapshot(doc => {
+      if (doc.exists) { setStockPollos(doc.data().pollos || 0); setStockRefrescos(doc.data().refrescos || 0); }
     });
-
-    const unsubCostos = db.collection('config').doc('costos').onSnapshot((docSnap) => {
-      if (docSnap.exists && docSnap.data().costoPollo) {
-        setCostoPolloUnidad(docSnap.data().costoPollo);
-      }
+    const unsubCostos = db.collection('config').doc('costos').onSnapshot(doc => {
+      if (doc.exists && doc.data().costoPollo) setCostoPolloUnidad(doc.data().costoPollo);
     });
-
-    const unsubTortilla = db.collection('inventario_tortilla').doc(hoyStr.replace(/\//g, '-')).onSnapshot((doc) => {
-      if (doc.exists) setTortillaProv(doc.data());
+    const unsubHistorialTortillas = db.collection('inventario_tortilla').onSnapshot(snap => {
+      const hist = {}; snap.forEach(doc => { hist[doc.id] = doc.data(); }); setHistorialTortillas(hist);
     });
-
-    const unsubHistorialTortillas = db.collection('inventario_tortilla').onSnapshot((snap) => {
-      const hist = {};
-      snap.forEach(doc => { hist[doc.id] = doc.data(); });
-      setHistorialTortillas(hist);
-    });
-
-    const unsubEntradas = db.collection('entradas_diarias').doc(hoyStr.replace(/\//g, '-')).onSnapshot((doc) => {
-      if (doc.exists) setEntradasHoy(doc.data());
-    });
-
-    return () => { unsubVentas(); unsubGastos(); unsubClientes(); unsubStock(); unsubCostos(); unsubTortilla(); unsubHistorialTortillas(); unsubEntradas(); };
+    return () => { unsubVentas(); unsubGastos(); unsubClientes(); unsubStock(); unsubCostos(); unsubHistorialTortillas(); };
   }, []);
 
-  const ventasHoy = ventas.filter(v => v.fechaDia === hoyStr);
-  const gastosHoy = gastos.filter(g => g.fechaDia === hoyStr);
+  // Efectos que dependen del DÍA SELECCIONADO (Máquina del Tiempo)
+  useEffect(() => {
+    const docId = diaSeleccionado.replace(/\//g, '-');
+    const unsubTortilla = db.collection('inventario_tortilla').doc(docId).onSnapshot(doc => {
+      if (doc.exists) setTortillaProv(doc.data()); else setTortillaProv({ dejo: 0, regreso: 0 });
+    });
+    const unsubEntradas = db.collection('entradas_diarias').doc(docId).onSnapshot(doc => {
+      if (doc.exists) setEntradasHoy(doc.data()); else setEntradasHoy({ pollos: 0, refrescos: 0 });
+    });
+    return () => { unsubTortilla(); unsubEntradas(); };
+  }, [diaSeleccionado]);
+
+  // Filtramos datos usando el Día Seleccionado
+  const ventasHoy = ventas.filter(v => v.fechaDia === diaSeleccionado);
+  const gastosHoy = gastos.filter(g => g.fechaDia === diaSeleccionado);
 
   const verificarPin = () => {
-    if (inputPin === PIN_PATRON) {
-      setEsPatron(true); setModalPin(false); setInputPin('');
-    } else {
-      setModalAlerta({ visible: true, mensaje: "PIN Incorrecto." }); setInputPin('');
-    }
+    if (inputPin === PIN_PATRON) { setEsPatron(true); setModalPin(false); setInputPin(''); } 
+    else { setModalAlerta({ visible: true, mensaje: "PIN Incorrecto." }); setInputPin(''); }
   };
 
-  const cerrarSesionPatron = () => { setEsPatron(false); setVista('local'); };
+  const cerrarSesionPatron = () => { setEsPatron(false); setVista('local'); setFechaOperacion(getLocalYYYYMMDD()); };
 
   const clientesVIP = useMemo(() => {
     const mapa = {};
-    clientesAgenda.forEach(c => {
-      mapa[c.telefono] = {
-        telefono: c.telefono,
-        nombre: c.nombre,
-        totalPollos: 0,
-        totalPedidos: 0,
-        fechas: new Set()
-      };
-    });
-
+    clientesAgenda.forEach(c => { mapa[c.telefono] = { telefono: c.telefono, nombre: c.nombre, totalPollos: 0, totalPedidos: 0, fechas: new Set() }; });
     ventas.forEach(v => {
       if (v.telefono && typeof v.telefono === 'string' && v.telefono.length === 10) {
-        if (!mapa[v.telefono]) {
-          mapa[v.telefono] = {
-            telefono: v.telefono,
-            nombre: v.nombreCliente || 'Cliente Sin Nombre',
-            totalPollos: 0,
-            totalPedidos: 0,
-            fechas: new Set()
-          };
-        }
+        if (!mapa[v.telefono]) mapa[v.telefono] = { telefono: v.telefono, nombre: v.nombreCliente || 'Sin Nombre', totalPollos: 0, totalPedidos: 0, fechas: new Set() };
         mapa[v.telefono].totalPollos += v.pollosTotales || 0;
         mapa[v.telefono].totalPedidos += 1;
         mapa[v.telefono].fechas.add(v.fechaDia);
-        if (v.nombreCliente && v.nombreCliente !== 'Cliente Sin Nombre') {
-          mapa[v.telefono].nombre = v.nombreCliente; 
-        }
+        if (v.nombreCliente && v.nombreCliente !== 'Sin Nombre') mapa[v.telefono].nombre = v.nombreCliente; 
       }
     });
-
     return Object.values(mapa).sort((a, b) => b.totalPollos - a.totalPollos);
   }, [ventas, clientesAgenda]);
 
   const handleOrdenChange = (e) => {
     const { name, value } = e.target;
-    if (['notasEnvio', 'metodoPago', 'nombreCliente', 'domicilio'].includes(name)) {
+    if (['notasEnvio', 'metodoPago', 'nombreCliente', 'domicilio', 'costillasMonto', 'extraManual'].includes(name)) {
       setOrden(prev => ({ ...prev, [name]: value }));
-    } else if (name === 'extraManual') {
-      setOrden(prev => ({ ...prev, extraManual: value }));
     } else if (name !== 'telefono') {
       setOrden(prev => ({ ...prev, [name]: value === '' ? 0 : Math.max(0, parseInt(value) || 0) }));
     }
@@ -224,102 +207,67 @@ function App() {
   const handleTelefonoChange = (e) => {
     const valor = e.target.value.replace(/\D/g, '').slice(0, 10);
     setOrden(prev => ({ ...prev, telefono: valor }));
-
     if (valor.length > 2) {
-      const coincidencias = [];
-      const vistos = new Set();
-      
+      const coincidencias = []; const vistos = new Set();
       clientesVIP.forEach(c => {
-        if (c.telefono.includes(valor) && !vistos.has(c.telefono)) {
-          coincidencias.push({ telefono: c.telefono, nombre: c.nombre });
-          vistos.add(c.telefono);
-        }
+        if (c.telefono.includes(valor) && !vistos.has(c.telefono)) { coincidencias.push({ telefono: c.telefono, nombre: c.nombre }); vistos.add(c.telefono); }
       });
-      
-      setBusquedaTelefonos(coincidencias.slice(0, 5));
-      setMostrarSugerencias(true);
-    } else {
-      setMostrarSugerencias(false);
-    }
+      setBusquedaTelefonos(coincidencias.slice(0, 5)); setMostrarSugerencias(true);
+    } else { setMostrarSugerencias(false); }
   };
 
   const handleNombreChange = (e) => {
     const valor = e.target.value;
     setOrden(prev => ({ ...prev, nombreCliente: valor }));
-
     if (valor.length > 2) {
-      const coincidencias = [];
-      const vistos = new Set();
-      const valLower = valor.toLowerCase();
-      
+      const coincidencias = []; const vistos = new Set(); const valLower = valor.toLowerCase();
       clientesVIP.forEach(c => {
-        if (c.nombre && c.nombre.toLowerCase().includes(valLower) && !vistos.has(c.telefono)) {
-          coincidencias.push({ telefono: c.telefono, nombre: c.nombre });
-          vistos.add(c.telefono);
-        }
+        if (c.nombre && c.nombre.toLowerCase().includes(valLower) && !vistos.has(c.telefono)) { coincidencias.push({ telefono: c.telefono, nombre: c.nombre }); vistos.add(c.telefono); }
       });
-      
-      setBusquedaNombres(coincidencias.slice(0, 5));
-      setMostrarSugerenciasNombre(true);
-    } else {
-      setMostrarSugerenciasNombre(false);
-    }
+      setBusquedaNombres(coincidencias.slice(0, 5)); setMostrarSugerenciasNombre(true);
+    } else { setMostrarSugerenciasNombre(false); }
   };
 
   const seleccionarClientePredictivo = (cliente) => {
     setOrden(prev => ({ ...prev, telefono: cliente.telefono, nombreCliente: cliente.nombre }));
-    setMostrarSugerencias(false);
-    setMostrarSugerenciasNombre(false);
+    setMostrarSugerencias(false); setMostrarSugerenciasNombre(false);
   };
 
   const agregarClienteManual = async (e) => {
     e.preventDefault();
     const tel = nuevoClienteManual.telefono.replace(/\D/g, '');
-    if (tel.length !== 10 || !nuevoClienteManual.nombre) {
-      return setModalAlerta({ visible: true, mensaje: "Ingresa 10 dígitos y el nombre." });
-    }
+    if (tel.length !== 10 || !nuevoClienteManual.nombre) return setModalAlerta({ visible: true, mensaje: "Ingresa 10 dígitos y el nombre." });
     try {
-      await db.collection('clientes').doc(tel).set({
-        telefono: tel,
-        nombre: nuevoClienteManual.nombre,
-        agregadoManual: true
-      }, { merge: true });
-      setNuevoClienteManual({ telefono: '', nombre: '' });
-      setModalAlerta({ visible: true, mensaje: "¡Cliente guardado con éxito!" });
-    } catch (error) {
-      setModalAlerta({ visible: true, mensaje: "Error al guardar. Revisa conexión." });
-    }
+      await db.collection('clientes').doc(tel).set({ telefono: tel, nombre: nuevoClienteManual.nombre, agregadoManual: true }, { merge: true });
+      setNuevoClienteManual({ telefono: '', nombre: '' }); setModalAlerta({ visible: true, mensaje: "¡Cliente guardado con éxito!" });
+    } catch (error) { setModalAlerta({ visible: true, mensaje: "Error al guardar." }); }
   };
 
   const agregarStockPollo = async (e) => {
-    e.preventDefault();
-    const cantidad = parseFloat(ingresoPollo);
+    e.preventDefault(); const cantidad = parseFloat(ingresoPollo);
     if (isNaN(cantidad) || cantidad <= 0) return setModalAlerta({ visible: true, mensaje: "Ingresa cantidad válida." });
     await db.collection('config').doc('stock').set({ pollos: firebase.firestore.FieldValue.increment(cantidad) }, { merge: true });
-    await db.collection('entradas_diarias').doc(hoyStr.replace(/\//g, '-')).set({ pollos: firebase.firestore.FieldValue.increment(cantidad) }, { merge: true });
+    await db.collection('entradas_diarias').doc(diaSeleccionado.replace(/\//g, '-')).set({ pollos: firebase.firestore.FieldValue.increment(cantidad) }, { merge: true });
     setIngresoPollo('');
   };
 
   const restarMermaPollo = async (e) => {
-    e.preventDefault();
-    const cantidad = parseFloat(mermaPollo);
+    e.preventDefault(); const cantidad = parseFloat(mermaPollo);
     if (isNaN(cantidad) || cantidad <= 0) return setModalAlerta({ visible: true, mensaje: "Ingresa cantidad válida." });
     await db.collection('config').doc('stock').set({ pollos: firebase.firestore.FieldValue.increment(-cantidad) }, { merge: true });
     setMermaPollo('');
   };
 
   const agregarStockRefresco = async (e) => {
-    e.preventDefault();
-    const cantidad = parseInt(ingresoRefresco);
+    e.preventDefault(); const cantidad = parseInt(ingresoRefresco);
     if (isNaN(cantidad) || cantidad <= 0) return setModalAlerta({ visible: true, mensaje: "Ingresa cantidad válida." });
     await db.collection('config').doc('stock').set({ refrescos: firebase.firestore.FieldValue.increment(cantidad) }, { merge: true });
-    await db.collection('entradas_diarias').doc(hoyStr.replace(/\//g, '-')).set({ refrescos: firebase.firestore.FieldValue.increment(cantidad) }, { merge: true });
+    await db.collection('entradas_diarias').doc(diaSeleccionado.replace(/\//g, '-')).set({ refrescos: firebase.firestore.FieldValue.increment(cantidad) }, { merge: true });
     setIngresoRefresco('');
   };
 
   const restarMermaRefresco = async (e) => {
-    e.preventDefault();
-    const cantidad = parseInt(mermaRefresco);
+    e.preventDefault(); const cantidad = parseInt(mermaRefresco);
     if (isNaN(cantidad) || cantidad <= 0) return setModalAlerta({ visible: true, mensaje: "Ingresa cantidad válida." });
     await db.collection('config').doc('stock').set({ refrescos: firebase.firestore.FieldValue.increment(-cantidad) }, { merge: true });
     setMermaRefresco('');
@@ -328,18 +276,17 @@ function App() {
   const actualizarTortillaProv = async (campo, valor) => {
     const nuevaData = { ...tortillaProv, [campo]: parseFloat(valor) || 0 };
     setTortillaProv(nuevaData);
-    await db.collection('inventario_tortilla').doc(hoyStr.replace(/\//g, '-')).set(nuevaData);
+    await db.collection('inventario_tortilla').doc(diaSeleccionado.replace(/\//g, '-')).set(nuevaData);
   };
 
   const guardarCostoMateriaPrima = async (nuevoCosto) => {
     const costo = parseFloat(nuevoCosto);
     if (!isNaN(costo) && costo > 0) {
-      setCostoPolloUnidad(costo);
-      await db.collection('config').doc('costos').set({ costoPollo: costo }, { merge: true });
+      setCostoPolloUnidad(costo); await db.collection('config').doc('costos').set({ costoPollo: costo }, { merge: true });
     }
   };
 
-  // CÁLCULOS MATEMÁTICOS DE LA ORDEN CON NUMERACIÓN ESTRICTA
+  // CÁLCULOS MATEMÁTICOS DE LA ORDEN
   const subtotalPollo = 
     (Number(orden.entero) || 0) * PRECIOS.asado +
     (Number(orden.chiltepin) || 0) * PRECIOS.sabor +
@@ -350,12 +297,10 @@ function App() {
     (Number(orden.paqSaborMedio) || 0) * PRECIOS.paquete15Sabor +
     (Number(orden.paquete2) || 0) * PRECIOS.paquete2Asados +
     (Number(orden.paq2Sabores) || 0) * PRECIOS.paquete2Sabores +
-    (Number(orden.mixto) || 0) * PRECIOS.mixto +
     (Number(orden.paqueteFamiliar) || 0) * PRECIOS.paqueteFamiliar;
 
-  const subtotalCrujiente = 
-    (Number(orden.crujienteEntero) || 0) * PRECIOS.sabor +
-    (Number(orden.crujienteMitad) || 0) * PRECIOS.mitad;
+  const subtotalCostillas = Number(orden.costillasMonto) || 0;
+  const extraManualMonto = Number(orden.extraManual) || 0;
 
   const subtotalComplementos = 
     (Number(orden.tortillaMedio) || 0) * PRECIOS.tortillaMedio +
@@ -364,24 +309,19 @@ function App() {
     (Number(orden.salchichas) || 0) * PRECIOS.salchichas +
     (Number(orden.frijoles) || 0) * PRECIOS.frijoles;
 
-  const extraManualMonto = Number(orden.extraManual) || 0;
   const costoEnvio = Number(orden.domicilio) || 0;
-
-  const totalOrden = subtotalPollo + subtotalCrujiente + subtotalComplementos + extraManualMonto + costoEnvio;
+  const totalOrden = subtotalPollo + subtotalCostillas + subtotalComplementos + extraManualMonto + costoEnvio;
 
   const pollosOrden = 
     (Number(orden.entero) || 0) * 1 +
     (Number(orden.chiltepin) || 0) * 1 +
     (Number(orden.enchipotlado) || 0) * 1 +
     (Number(orden.encebollado) || 0) * 1 +
-    (Number(orden.crujienteEntero) || 0) * 1 +
     (Number(orden.mitad) || 0) * 0.5 +
-    (Number(orden.crujienteMitad) || 0) * 0.5 +
     (Number(orden.paquete15) || 0) * 1.5 +
     (Number(orden.paqSaborMedio) || 0) * 1.5 +
     (Number(orden.paquete2) || 0) * 2 +
     (Number(orden.paq2Sabores) || 0) * 2 +
-    (Number(orden.mixto) || 0) * 1 +
     (Number(orden.paqueteFamiliar) || 0) * 1.5;
 
   const refrescosEnPaquetes = 
@@ -399,49 +339,44 @@ function App() {
     if (tipo === 'domicilio' && !orden.telefono) return setModalAlerta({ visible: true, mensaje: "Ingresa el teléfono del cliente." });
 
     const nuevaVenta = {
-      id: Date.now(), tipo, fechaDia: hoyStr,
+      id: Date.now(), tipo, fechaDia: diaSeleccionado, // Usamos la fecha de la Máquina del Tiempo
       hora: new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}),
-      detalles: { ...orden, extraManual: extraManualMonto }, 
-      subtotalPollo, subtotalCrujiente, subtotalComplementos, extraManual: extraManualMonto, costoEnvio,
+      detalles: { ...orden, extraManual: extraManualMonto, costillasMonto: subtotalCostillas }, 
+      subtotalPollo, subtotalCostillas, subtotalComplementos, extraManual: extraManualMonto, costoEnvio,
       total: totalOrden, pollosTotales: pollosOrden, refrescosTotales: refrescosOrden, metodoPago: orden.metodoPago,
       telefono: orden.telefono || '', nombreCliente: orden.nombreCliente || '', notasEnvio: orden.notasEnvio || ''
     };
 
     try {
       if (orden.telefono && orden.telefono.length === 10 && orden.nombreCliente) {
-         await db.collection('clientes').doc(orden.telefono).set({
-            telefono: orden.telefono, nombre: orden.nombreCliente
-         }, { merge: true });
+         await db.collection('clientes').doc(orden.telefono).set({ telefono: orden.telefono, nombre: orden.nombreCliente }, { merge: true });
       }
       await db.collection('ventas').add(nuevaVenta);
       
-      await db.collection('config').doc('stock').set({ 
-        pollos: firebase.firestore.FieldValue.increment(-pollosOrden), 
-        refrescos: firebase.firestore.FieldValue.increment(-refrescosOrden) 
-      }, { merge: true });
+      // Solo descontar stock si estamos operando en el día actual (evita descuadrar inventario si agregamos una venta de ayer)
+      if (diaSeleccionado === new Date().toLocaleDateString('es-MX')) {
+        await db.collection('config').doc('stock').set({ 
+          pollos: firebase.firestore.FieldValue.increment(-pollosOrden), 
+          refrescos: firebase.firestore.FieldValue.increment(-refrescosOrden) 
+        }, { merge: true });
+      }
 
       setOrden({ 
         entero: 0, chiltepin: 0, enchipotlado: 0, encebollado: 0, mitad: 0, 
-        crujienteEntero: 0, crujienteMitad: 0, 
-        paquete15: 0, paqSaborMedio: 0, paquete2: 0, paq2Sabores: 0, mixto: 0, paqueteFamiliar: 0,
-        extraManual: '',
+        paquete15: 0, paqSaborMedio: 0, paquete2: 0, paq2Sabores: 0, paqueteFamiliar: 0,
+        costillasMonto: '', extraManual: '',
         tortillaMedio: 0, tortillaKilo: 0, refresco: 0, salchichas: 0, frijoles: 0, 
         domicilio: '', notasEnvio: '', metodoPago: 'efectivo', telefono: '', nombreCliente: '' 
       });
-      setBusquedaTelefonos([]);
-      setBusquedaNombres([]);
-      setMostrarSugerencias(false);
-      setMostrarSugerenciasNombre(false);
-    } catch (error) {
-       setModalAlerta({ visible: true, mensaje: "Error al registrar la venta en la base de datos." });
-    }
+      setBusquedaTelefonos([]); setBusquedaNombres([]); setMostrarSugerencias(false); setMostrarSugerenciasNombre(false);
+    } catch (error) { setModalAlerta({ visible: true, mensaje: "Error al registrar la venta." }); }
   };
 
   const registrarGasto = async (e) => {
     e.preventDefault();
     const monto = parseFloat(nuevoGasto.monto);
     if (!nuevoGasto.descripcion || isNaN(monto) || monto <= 0) return setModalAlerta({ visible: true, mensaje: "Gasto inválido." });
-    await db.collection('gastos').add({ id: Date.now(), fechaDia: hoyStr, descripcion: nuevoGasto.descripcion, monto: monto });
+    await db.collection('gastos').add({ id: Date.now(), fechaDia: diaSeleccionado, descripcion: nuevoGasto.descripcion, monto: monto });
     setNuevoGasto({ descripcion: '', monto: '' });
   };
 
@@ -454,10 +389,13 @@ function App() {
           const v = ventas.find(v => v.id === idOriginal);
           if (v) {
             await db.collection('ventas').doc(dbId).delete();
-            await db.collection('config').doc('stock').set({ 
-              pollos: firebase.firestore.FieldValue.increment(v.pollosTotales || 0), 
-              refrescos: firebase.firestore.FieldValue.increment(v.refrescosTotales || 0) 
-            }, { merge: true });
+            // Restaurar stock solo si la venta eliminada es de hoy
+            if (v.fechaDia === new Date().toLocaleDateString('es-MX')) {
+              await db.collection('config').doc('stock').set({ 
+                pollos: firebase.firestore.FieldValue.increment(v.pollosTotales || 0), 
+                refrescos: firebase.firestore.FieldValue.increment(v.refrescosTotales || 0) 
+              }, { merge: true });
+            }
           }
         }
         if (tipo === 'gasto') await db.collection('gastos').doc(dbId).delete();
@@ -473,15 +411,14 @@ function App() {
       acc.ingresoTransferencia += v.metodoPago === 'transferencia' ? (v.total || 0) : 0;
       acc.pollos += v.pollosTotales || 0;
       
-      const refPaq = (det.refresco || 0) + (det.paquete15 || 0) + (det.paqSaborMedio || 0) + (det.paquete2 || 0) + (det.paq2Sabores || 0) + (det.crujientePaq15 || 0) + (det.crujientePaq2 || 0) + (det.paqueteFamiliar || 0);
+      const refPaq = (det.refresco || 0) + (det.paquete15 || 0) + (det.paqSaborMedio || 0) + (det.paquete2 || 0) + (det.paq2Sabores || 0) + (det.paqueteFamiliar || 0);
       acc.refrescosVendidos += refPaq;
       
-      acc.salchichasVendidas += (det.salchichas || 0);
-      acc.frijolesVendidos += (det.frijoles || 0);
-      acc.extrasManualesTotales += (det.extraManual ? Number(det.extraManual) : 0);
+      acc.costillasVendido += Number(det.costillasMonto) || 0;
+      acc.salchichasVendidas += (det.salchichas || 0) + ((det.paqueteFamiliar || 0) * 2);
+      acc.frijolesVendidos += (det.frijoles || 0) + (det.paqueteFamiliar || 0);
+      acc.extrasManualesTotales += Number(det.extraManual) || 0;
 
-      acc.crujientesReales += (det.crujienteEntero || 0) + (det.crujienteMitad || 0)*0.5 + (det.crujientePaq15 || 0)*1.5 + (det.crujientePaq2 || 0)*2 + (det.mixto || 0)*0.5;
-      
       acc.paquetesDescuento += (det.paquete15 || 0)*20 + (det.paqSaborMedio || 0)*20 + (det.paquete2 || 0)*20 + (det.paq2Sabores || 0)*20 + (det.paqueteFamiliar || 0)*15;
       
       if (v.tipo === 'domicilio') {
@@ -492,7 +429,7 @@ function App() {
       return acc;
     }, { 
       ventasTotales: 0, ingresoEfectivo: 0, ingresoTransferencia: 0, pollos: 0, 
-      refrescosVendidos: 0, crujientesReales: 0, paquetesDescuento: 0, 
+      refrescosVendidos: 0, costillasVendido: 0, paquetesDescuento: 0, 
       salchichasVendidas: 0, frijolesVendidos: 0, extrasManualesTotales: 0,
       cantidadEnvios: 0, costoEnvioEfectivo: 0, costoEnvioTransferencia: 0,
       totalGastos: listaGastos.reduce((sum, g) => sum + (g.monto || 0), 0)
@@ -500,7 +437,6 @@ function App() {
   };
 
   const resHoy = calcularResumen(ventasHoy, gastosHoy);
-  
   const pollosInicialHoy = stockPollos + resHoy.pollos - (entradasHoy.pollos || 0);
   const refrescosInicialHoy = stockRefrescos + resHoy.refrescosVendidos - (entradasHoy.refrescos || 0);
 
@@ -524,51 +460,28 @@ function App() {
   const exportarExcel = () => {
     let tablaHTML = `
       <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
-      <head>
-        <meta charset="UTF-8">
-        <style>
-          table { font-family: Arial, sans-serif; border-collapse: collapse; text-align: center; width: 100%; }
-          th { border: 1px solid #dddddd; padding: 8px; }
-          td { border: 1px solid #dddddd; padding: 8px; }
-        </style>
-      </head>
+      <head><meta charset="UTF-8"><style>table{font-family:Arial,sans-serif;border-collapse:collapse;text-align:center;width:100%;}th,td{border:1px solid #ddd;padding:8px;}</style></head>
       <body>
         <table>
           <thead>
-            <tr>
-              <th colspan="13" style="background-color: #ea580c; color: white; font-size: 24px; font-weight: bold; padding: 15px; text-align: center;">EL CHILPAYIN - REPORTE DE VENTAS Y UTILIDAD</th>
-            </tr>
+            <tr><th colspan="14" style="background-color: #ea580c; color: white; font-size: 24px; font-weight: bold; padding: 15px; text-align: center;">EL CHILPAYIN - REPORTE DE VENTAS Y UTILIDAD</th></tr>
             <tr style="background-color: #1f2937; color: white; font-weight: bold;">
-              <th>Fecha</th>
-              <th>Pollos Vendidos</th>
-              <th>Salchichas</th>
-              <th>Frijoles</th>
-              <th>Ventas Brutas</th>
-              <th>Efectivo Cobrado</th>
-              <th>Transferencias</th>
-              <th>Gastos Físicos</th>
-              <th>Retiro Extras</th>
-              <th>Pago Tortillería</th>
-              <th>Pago Repartidor</th>
-              <th>Ganancia Neta (Utilidad Libre)</th>
-              <th>Diezmo Sugerido (10%)</th>
+              <th>Fecha</th><th>Pollos Vendidos</th><th>Costillas Vendidas ($)</th><th>Salchichas</th><th>Frijoles</th>
+              <th>Ventas Brutas</th><th>Efectivo Cobrado</th><th>Transferencias</th><th>Gastos Físicos</th>
+              <th>Retiro Extras</th><th>Pago Tortillería</th><th>Pago Repartidor</th><th>Ganancia Neta (Utilidad Libre)</th><th>Diezmo Sugerido (10%)</th>
             </tr>
           </thead>
           <tbody>
     `;
-
     historialDias.forEach(dia => {
       const rDia = calcularResumen(dia.ventas, dia.gastos);
       const dPaqDia = rDia.paquetesDescuento || 0;
       const tortillaDia = historialTortillas[dia.fecha.replace(/\//g, '-')] || { dejo: 0, regreso: 0 };
       const pTortillaDia = ((tortillaDia.dejo || 0) - (tortillaDia.regreso || 0)) * 21;
-      
       const vNetasReales = (rDia.ingresoEfectivo + rDia.ingresoTransferencia) - dPaqDia;
       const cProduccion = rDia.pollos * costoPolloUnidad;
       const pEnvios = rDia.costoEnvioEfectivo + rDia.costoEnvioTransferencia;
-      
       const extrasMontoDia = (rDia.salchichasVendidas * PRECIOS.salchichas) + (rDia.frijolesVendidos * PRECIOS.frijoles);
-
       const utilDia = vNetasReales - cProduccion - pTortillaDia - rDia.totalGastos - pEnvios - extrasMontoDia;
       const diezDia = utilDia > 0 ? utilDia * 0.10 : 0;
 
@@ -576,6 +489,7 @@ function App() {
         <tr>
           <td style="font-weight: bold;">${dia.fecha}</td>
           <td style="color: #2563eb; font-weight: bold;">${rDia.pollos}</td>
+          <td style="color: #c2410c; font-weight: bold;">$${rDia.costillasVendido.toFixed(2)}</td>
           <td style="color: #ea580c; font-weight: bold;">${rDia.salchichasVendidas}</td>
           <td style="color: #9a3412; font-weight: bold;">${rDia.frijolesVendidos}</td>
           <td>$${rDia.ventasTotales.toFixed(2)}</td>
@@ -590,21 +504,11 @@ function App() {
         </tr>
       `;
     });
-
-    tablaHTML += `
-          </tbody>
-        </table>
-      </body>
-      </html>
-    `;
-
+    tablaHTML += `</tbody></table></body></html>`;
     const blob = new Blob([tablaHTML], { type: 'application/vnd.ms-excel;charset=utf-8' });
-    const link = document.createElement("a");
-    link.href = URL.createObjectURL(blob);
+    const link = document.createElement("a"); link.href = URL.createObjectURL(blob);
     link.setAttribute("download", `Reporte_Chilpayin_${hoyStr.replace(/\//g, '-')}.xls`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    document.body.appendChild(link); link.click(); document.body.removeChild(link);
   };
 
   const kgVendidosTortilla = (tortillaProv.dejo || 0) - (tortillaProv.regreso || 0);
@@ -670,9 +574,21 @@ function App() {
       <header className="bg-gray-900 text-white shadow-md sticky top-0 z-10">
         <div className="max-w-6xl mx-auto p-4 flex items-center justify-between">
           <h1 className="text-xl sm:text-2xl font-black tracking-tight text-orange-500 flex items-center gap-2"><Iconos.Utensils /> EL CHILPAYIN</h1>
-          <button onClick={() => esPatron ? cerrarSesionPatron() : setModalPin(true)} className={`px-3 py-1.5 rounded font-bold text-sm ${esPatron ? 'bg-green-600' : 'bg-gray-700'}`}>
-            {esPatron ? 'Patrón' : 'Empleado'}
-          </button>
+          <div className="flex items-center gap-3">
+            {/* MÁQUINA DEL TIEMPO (Solo visible para Patrón) */}
+            {esPatron && (
+               <input 
+                 type="date" 
+                 value={fechaOperacion} 
+                 onChange={(e) => setFechaOperacion(e.target.value)} 
+                 className="text-gray-900 px-2 py-1 rounded text-xs font-bold bg-orange-100 outline-none cursor-pointer"
+                 title="Máquina del Tiempo: Cambiar fecha de operación"
+               />
+            )}
+            <button onClick={() => esPatron ? cerrarSesionPatron() : setModalPin(true)} className={`px-3 py-1.5 rounded font-bold text-sm shadow ${esPatron ? 'bg-green-600' : 'bg-gray-700'}`}>
+              {esPatron ? 'Patrón' : 'Empleado'}
+            </button>
+          </div>
         </div>
         <div className="flex overflow-x-auto bg-gray-800 scrollbar-hide">
           {menuTabs.map(tab => (
@@ -688,9 +604,9 @@ function App() {
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
             <section className="lg:col-span-7 space-y-4">
               
-              {/* BLOQUE 1: POLLOS TRADICIONALES */}
+              {/* BLOQUE 1: POLLOS TRADICIONALES Y SABORES */}
               <div className="bg-white rounded-xl shadow-sm border p-4 space-y-3">
-                <h3 className="text-sm font-black text-orange-600 uppercase tracking-wider border-b pb-1">Pollos Tradicionales y Sabores</h3>
+                <h3 className="text-sm font-black text-orange-600 uppercase tracking-wider border-b pb-1">Pollos y Sabores</h3>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   <ProductoInput nombre="Pollo Asado" desc="$150" name="entero" value={orden.entero} onChange={handleOrdenChange} />
                   <ProductoInput nombre="Chiltepín" desc="$155" name="chiltepin" value={orden.chiltepin} onChange={handleOrdenChange} />
@@ -700,28 +616,22 @@ function App() {
                 </div>
               </div>
 
-              {/* BLOQUE 2: CRUJIENTE Y PAQUETES */}
+              {/* BLOQUE 2: PAQUETES ESPECIALES */}
               <div className="bg-white rounded-xl shadow-sm border p-4 space-y-3 border-l-4 border-l-amber-500">
-                <h3 className="text-sm font-black text-amber-600 uppercase tracking-wider border-b pb-1">Pollo Crujiente y Paquetes</h3>
+                <h3 className="text-sm font-black text-amber-600 uppercase tracking-wider border-b pb-1">Paquetes Especiales</h3>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  <ProductoInput nombre="Crujiente Entero" desc="$155" name="crujienteEntero" value={orden.crujienteEntero} onChange={handleOrdenChange} />
-                  <ProductoInput nombre="Crujiente Mitad" desc="$80" name="crujienteMitad" value={orden.crujienteMitad} onChange={handleOrdenChange} />
-                </div>
-
-                <div className="border-t pt-2 mt-2">
-                  <h4 className="text-xs font-bold text-gray-500 uppercase mb-2">Paquetes Especiales</h4>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    <ProductoInput nombre="Paquete Asado (1.5)" desc="$250" name="paquete15" value={orden.paquete15} onChange={handleOrdenChange} />
-                    <ProductoInput nombre="Paq. Sabor + 1/2 Asado" desc="$255" name="paqSaborMedio" value={orden.paqSaborMedio} onChange={handleOrdenChange} />
-                    <ProductoInput nombre="Paq. 2 Pollos (1 Asado + 1 Sabor)" desc="$325" name="paq2Sabores" value={orden.paq2Sabores} onChange={handleOrdenChange} />
-                    <ProductoInput nombre="Paq. 2 Pollos Asados" desc="$320" name="paquete2" value={orden.paquete2} onChange={handleOrdenChange} />
-                    <ProductoInput nombre="Pollo Mixto" desc="$150" name="mixto" value={orden.mixto} onChange={handleOrdenChange} />
-                    <ProductoInput nombre="Paquete Familiar" desc="$290" name="paqueteFamiliar" value={orden.paqueteFamiliar} onChange={handleOrdenChange} />
-                  </div>
+                  <ProductoInput nombre="Paquete Asado (1.5)" desc="$250" name="paquete15" value={orden.paquete15} onChange={handleOrdenChange} />
+                  <ProductoInput nombre="Paq. Sabor + 1/2 Asado" desc="$255" name="paqSaborMedio" value={orden.paqSaborMedio} onChange={handleOrdenChange} />
+                  <ProductoInput nombre="Paq. 2 Pollos Asados" desc="$320" name="paquete2" value={orden.paquete2} onChange={handleOrdenChange} />
+                  <ProductoInput nombre="Paq. 2 P. (1 Asado + 1 Sabor)" desc="$325" name="paq2Sabores" value={orden.paq2Sabores} onChange={handleOrdenChange} />
+                  <ProductoInput nombre="Paquete Familiar" desc="$295" name="paqueteFamiliar" value={orden.paqueteFamiliar} onChange={handleOrdenChange} />
                 </div>
               </div>
 
-              {/* BLOQUE 3: COMPLEMENTOS Y EXTRAS */}
+              {/* BLOQUE 3: COSTILLAS ASADAS */}
+              <MontoInput nombre="Costillas Asadas" desc="Ingresa monto cobrado" name="costillasMonto" value={orden.costillasMonto} onChange={handleOrdenChange} />
+
+              {/* BLOQUE 4: COMPLEMENTOS Y BEBIDAS */}
               <div className="bg-white rounded-xl shadow-sm border p-4 space-y-3">
                 <h3 className="text-sm font-black text-gray-700 uppercase tracking-wider border-b pb-1">Complementos y Bebidas</h3>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -731,25 +641,9 @@ function App() {
                   <ProductoInput nombre="Salchichas" desc="$20" name="salchichas" value={orden.salchichas} onChange={handleOrdenChange} />
                   <ProductoInput nombre="Frijoles" desc="$20" name="frijoles" value={orden.frijoles} onChange={handleOrdenChange} />
                 </div>
-              </div>
-
-              {/* BLOQUE 4: CARGO EXTRA MANUAL */}
-              <div className="bg-orange-50 border border-orange-200 rounded-xl p-4 shadow-sm">
-                <h3 className="text-sm font-black text-orange-700 uppercase mb-2 flex items-center gap-2">
-                  <Iconos.PlusCircle /> Cobro Extra (Manual)
-                </h3>
-                <div className="flex items-center gap-3">
-                  <span className="font-bold text-gray-700">$</span>
-                  <input 
-                    type="number" 
-                    name="extraManual" 
-                    value={orden.extraManual} 
-                    onChange={handleOrdenChange} 
-                    placeholder="Monto extra manual" 
-                    min="0"
-                    step="0.5"
-                    className="w-full p-2.5 border rounded-lg font-bold text-lg text-gray-800 bg-white focus:ring-2 focus:ring-orange-500 outline-none"
-                  />
+                {/* EXTRAS MANUAL */}
+                <div className="pt-2">
+                   <MontoInput nombre="Extras (Manual)" desc="Cobra extras en dinero" name="extraManual" value={orden.extraManual} onChange={handleOrdenChange} />
                 </div>
               </div>
 
@@ -766,47 +660,31 @@ function App() {
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 relative">
                     <div className="relative">
                       <label className="block text-[10px] text-gray-400 uppercase font-black mb-1">Buscar Número</label>
-                      <input 
-                        type="text" 
-                        name="telefono" 
-                        placeholder="Ej. 921..." 
-                        value={orden.telefono} 
-                        onChange={handleTelefonoChange} 
-                        onFocus={() => orden.telefono.length > 2 && setMostrarSugerencias(true)} 
-                        className="w-full text-gray-900 font-bold p-2.5 rounded-lg text-sm outline-none" 
-                      />
+                      <input type="text" name="telefono" placeholder="Ej. 921..." value={orden.telefono} onChange={handleTelefonoChange} onFocus={() => orden.telefono.length > 2 && setMostrarSugerencias(true)} onBlur={() => setTimeout(() => setMostrarSugerencias(false), 200)} className="w-full text-gray-900 font-bold p-2.5 rounded-lg text-sm bg-white outline-none focus:ring-2 focus:ring-orange-500" />
                       {mostrarSugerencias && busquedaTelefonos.length > 0 && (
-                        <div className="absolute top-full left-0 right-0 bg-white text-gray-900 border rounded-b-lg shadow-xl z-20 max-h-40 overflow-y-auto">
-                          {busquedaTelefonos.map((c, idx) => (
-                            <div key={idx} onMouseDown={() => seleccionarClientePredictivo(c)} className="p-2 hover:bg-orange-100 cursor-pointer text-xs border-b">
-                              <span className="font-bold block">{c.telefono}</span>
-                              <span className="text-gray-600">{c.nombre}</span>
-                            </div>
+                        <ul className="absolute z-50 w-full bg-white border border-gray-300 rounded-lg shadow-xl mt-1 max-h-48 overflow-y-auto">
+                          {busquedaTelefonos.map(c => (
+                            <li key={c.telefono} onMouseDown={() => seleccionarClientePredictivo(c)} className="p-3 hover:bg-orange-100 cursor-pointer border-b border-gray-100 flex flex-col">
+                              <span className="font-black text-gray-900">{c.telefono}</span>
+                              <span className="text-xs text-orange-600 font-bold uppercase">{c.nombre}</span>
+                            </li>
                           ))}
-                        </div>
+                        </ul>
                       )}
                     </div>
 
                     <div className="relative">
-                      <label className="block text-[10px] text-gray-400 uppercase font-black mb-1">Nombre Cliente</label>
-                      <input 
-                        type="text" 
-                        name="nombreCliente" 
-                        placeholder="Nombre" 
-                        value={orden.nombreCliente} 
-                        onChange={handleNombreChange} 
-                        onFocus={() => orden.nombreCliente.length > 2 && setMostrarSugerenciasNombre(true)} 
-                        className="w-full text-gray-900 font-bold p-2.5 rounded-lg text-sm outline-none" 
-                      />
+                      <label className="block text-[10px] text-gray-400 uppercase font-black mb-1">Buscar Nombre</label>
+                      <input type="text" name="nombreCliente" placeholder="Ej. Juan..." value={orden.nombreCliente} onChange={handleNombreChange} onFocus={() => orden.nombreCliente.length > 2 && setMostrarSugerenciasNombre(true)} onBlur={() => setTimeout(() => setMostrarSugerenciasNombre(false), 200)} className="w-full text-gray-900 font-bold p-2.5 rounded-lg text-sm bg-white outline-none focus:ring-2 focus:ring-orange-500" />
                       {mostrarSugerenciasNombre && busquedaNombres.length > 0 && (
-                        <div className="absolute top-full left-0 right-0 bg-white text-gray-900 border rounded-b-lg shadow-xl z-20 max-h-40 overflow-y-auto">
-                          {busquedaNombres.map((c, idx) => (
-                            <div key={idx} onMouseDown={() => seleccionarClientePredictivo(c)} className="p-2 hover:bg-orange-100 cursor-pointer text-xs border-b">
-                              <span className="font-bold block">{c.nombre}</span>
-                              <span className="text-gray-600">{c.telefono}</span>
-                            </div>
+                        <ul className="absolute z-50 w-full bg-white border border-gray-300 rounded-lg shadow-xl mt-1 max-h-48 overflow-y-auto">
+                          {busquedaNombres.map(c => (
+                            <li key={c.telefono} onMouseDown={() => seleccionarClientePredictivo(c)} className="p-3 hover:bg-orange-100 cursor-pointer border-b border-gray-100 flex flex-col">
+                              <span className="text-xs text-orange-600 font-bold uppercase">{c.nombre}</span>
+                              <span className="font-black text-gray-900 text-[10px]">📞 {c.telefono}</span>
+                            </li>
                           ))}
-                        </div>
+                        </ul>
                       )}
                     </div>
                   </div>
@@ -833,9 +711,9 @@ function App() {
 
                 <div className="space-y-1 text-sm text-gray-600 border-b pb-3">
                   <div className="flex justify-between"><span>Pollos:</span><span className="font-bold">${subtotalPollo.toFixed(2)}</span></div>
-                  <div className="flex justify-between"><span>Crujiente:</span><span className="font-bold">${subtotalCrujiente.toFixed(2)}</span></div>
+                  {subtotalCostillas > 0 && <div className="flex justify-between text-orange-800 font-bold"><span>Costillas:</span><span>+${subtotalCostillas.toFixed(2)}</span></div>}
                   <div className="flex justify-between"><span>Complementos:</span><span className="font-bold">${subtotalComplementos.toFixed(2)}</span></div>
-                  {extraManualMonto > 0 && <div className="flex justify-between text-orange-600 font-bold"><span>Extra Manual:</span><span>+${extraManualMonto.toFixed(2)}</span></div>}
+                  {extraManualMonto > 0 && <div className="flex justify-between text-orange-600 font-bold"><span>Extras (Manual):</span><span>+${extraManualMonto.toFixed(2)}</span></div>}
                   {costoEnvio > 0 && <div className="flex justify-between text-blue-600 font-bold"><span>Envío:</span><span>+${costoEnvio.toFixed(2)}</span></div>}
                 </div>
 
@@ -860,198 +738,380 @@ function App() {
                 </button>
               </div>
             </section>
+            
+            <section className="lg:col-span-12 mt-2">
+              <div className="bg-white rounded-xl shadow-lg border-t-4 border-gray-400 overflow-hidden">
+                <div className="bg-gray-50 p-3 border-b flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Iconos.ListOrdered />
+                    <h2 className="text-sm font-bold text-gray-700">Registro en vivo ({diaSeleccionado})</h2>
+                  </div>
+                  <span className="bg-blue-100 text-blue-800 text-xs font-black px-3 py-1 rounded-full border border-blue-200 shadow-sm">
+                     🐔 {resHoy.pollos} Pollos Vendidos
+                  </span>
+                </div>
+                <div className="max-h-[300px] overflow-y-auto">
+                  {ventasHoy.length === 0 ? (
+                    <p className="p-6 text-center text-gray-400 text-sm">Sin ventas registradas en esta fecha.</p>
+                  ) : (
+                    <ul className="divide-y divide-gray-100">
+                      {ventasHoy.map((v) => {
+                        let det = v.detalles || {};
+                        return (
+                        <li key={v.dbId || v.id} className="p-3 hover:bg-gray-50 flex justify-between items-start">
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2 mb-1">
+                              <span className="text-xs font-bold bg-gray-200 text-gray-700 px-2 py-0.5 rounded">{v.hora}</span>
+                              <span className={`text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded ${v.metodoPago === 'efectivo' ? 'bg-green-100 text-green-700' : 'bg-purple-100 text-purple-700'}`}>{v.metodoPago}</span>
+                              {v.tipo === 'domicilio' && <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded bg-blue-100 text-blue-700">Envío</span>}
+                            </div>
+                            {v.nombreCliente && (
+                              <p className="text-xs font-black text-gray-800 uppercase">👤 {v.nombreCliente} <span className="text-gray-400 font-normal">({v.telefono})</span></p>
+                            )}
+                            <p className="text-xs text-gray-600 font-medium leading-relaxed mt-1">
+                              {det.entero > 0 && `${det.entero} Asad(Ent) `}
+                              {det.chiltepin > 0 && `${det.chiltepin} Chiltepin `}
+                              {det.enchipotlado > 0 && `${det.enchipotlado} Enchipotlado `}
+                              {det.encebollado > 0 && `${det.encebollado} Encebollado `}
+                              {det.mitad > 0 && `${det.mitad} Asad(Mit) `}
+                              {det.paquete15 > 0 && `${det.paquete15} AsadPq(1.5) `}
+                              {det.paqSaborMedio > 0 && `${det.paqSaborMedio} Pq(Sabor+Med) `}
+                              {det.paquete2 > 0 && `${det.paquete2} AsadPq(2) `}
+                              {det.paq2Sabores > 0 && `${det.paq2Sabores} Pq(Asad+Sabor) `}
+                              {det.paqueteFamiliar > 0 && `${det.paqueteFamiliar} Paq.Familiar `}
+                              {Number(det.costillasMonto) > 0 && `Costillas($${det.costillasMonto}) `}
+                              {det.tortillaMedio > 0 && `${det.tortillaMedio} Tort(½) `}
+                              {det.tortillaKilo > 0 && `${det.tortillaKilo} Tort(1kg) `}
+                              {det.refresco > 0 && `${det.refresco} Ref `}
+                              {det.salchichas > 0 && `${det.salchichas} Salchichas `}
+                              {det.frijoles > 0 && `${det.frijoles} Frijoles `}
+                              {Number(det.extraManual) > 0 && `Extras($${det.extraManual}) `}
+                            </p>
+                          </div>
+                          <div className="flex flex-col items-end gap-2 ml-2">
+                            <span className="font-bold text-gray-800">${(v.total || 0).toFixed(2)}</span>
+                            {esPatron && <button onClick={() => eliminarRegistro(v.dbId, v.id, 'venta')} className="text-red-400 hover:text-red-600 p-1"><Iconos.Trash2 /></button>}
+                          </div>
+                        </li>
+                      )})}
+                    </ul>
+                  )}
+                </div>
+              </div>
+            </section>
           </div>
         )}
 
-        {/* VISTA GASTOS */}
         {vista === 'gastos' && (
           <div className="max-w-2xl mx-auto space-y-6">
-            <div className="bg-white p-6 rounded-xl shadow-lg border">
-              <h2 className="text-xl font-bold mb-4 flex items-center gap-2 text-red-600"><Iconos.MinusCircle /> Registrar Gasto</h2>
-              <form onSubmit={registrarGasto} className="space-y-4">
+            <div className="bg-white p-6 rounded-xl shadow-lg border-t-4 border-yellow-500">
+              <h3 className="font-black text-gray-800 mb-4 flex items-center gap-2"><Iconos.Store /> Inventario Tortilla ({diaSeleccionado})</h3>
+              <div className="grid grid-cols-2 gap-4 mb-4">
                 <div>
-                  <label className="block text-sm font-bold text-gray-700 mb-1">Descripción</label>
-                  <input type="text" value={nuevoGasto.descripcion} onChange={(e) => setNuevoGasto(prev => ({ ...prev, descripcion: e.target.value }))} placeholder="Ej. Carbón, Verduras..." className="w-full p-2.5 border rounded-lg outline-none font-bold" />
+                  <label className="text-xs font-bold text-gray-500 uppercase">KG Que Dejó:</label>
+                  <input type="number" value={tortillaProv.dejo || ''} onChange={(e) => actualizarTortillaProv('dejo', e.target.value)} className="w-full p-3 border rounded text-center text-lg font-bold outline-none focus:border-yellow-500" />
                 </div>
                 <div>
-                  <label className="block text-sm font-bold text-gray-700 mb-1">Monto ($)</label>
-                  <input type="number" value={nuevoGasto.monto} onChange={(e) => setNuevoGasto(prev => ({ ...prev, monto: e.target.value }))} placeholder="0.00" className="w-full p-2.5 border rounded-lg outline-none font-bold" />
+                  <label className="text-xs font-bold text-gray-500 uppercase">KG Que Regresa:</label>
+                  <input type="number" value={tortillaProv.regreso || ''} onChange={(e) => actualizarTortillaProv('regreso', e.target.value)} className="w-full p-3 border rounded text-center text-lg font-bold outline-none focus:border-yellow-500" />
                 </div>
-                <button type="submit" className="w-full bg-red-600 text-white py-3 rounded-lg font-bold shadow">Guardar Gasto</button>
+              </div>
+              <div className="bg-yellow-50 p-4 rounded flex justify-between items-center border border-yellow-200">
+                <span className="font-bold text-yellow-800">Costo a Pagar de Caja:</span>
+                <span className="font-black text-2xl text-yellow-700">${( ((tortillaProv.dejo || 0) - (tortillaProv.regreso || 0)) * 21 ).toFixed(2)}</span>
+              </div>
+            </div>
+
+            <div className="bg-white p-6 rounded-xl shadow-lg border-t-4 border-red-500">
+              <h3 className="font-black text-gray-800 mb-4 flex items-center gap-2"><Iconos.MinusCircle /> Registrar Gasto Físico ({diaSeleccionado})</h3>
+              <form onSubmit={registrarGasto} className="flex flex-col gap-3 mb-6">
+                <input type="text" placeholder="Ej. Hielo, Bolsas, Limpieza..." value={nuevoGasto.descripcion} onChange={(e) => setNuevoGasto({...nuevoGasto, descripcion: e.target.value})} className="w-full p-3 border rounded font-bold text-sm outline-none focus:border-red-500" />
+                <div className="flex gap-3">
+                  <span className="p-3 bg-gray-100 border rounded text-gray-500 font-bold">$</span>
+                  <input type="number" placeholder="0.00" value={nuevoGasto.monto} onChange={(e) => setNuevoGasto({...nuevoGasto, monto: e.target.value})} className="flex-1 p-3 border rounded font-bold text-center outline-none focus:border-red-500" />
+                  <button type="submit" className="bg-red-600 hover:bg-red-700 text-white px-6 font-bold rounded shadow-md"><Iconos.PlusCircle /></button>
+                </div>
+              </form>
+
+              <h4 className="font-bold text-sm text-gray-400 uppercase tracking-widest border-b pb-2 mb-3">Gastos Registrados el {diaSeleccionado}</h4>
+              <ul className="divide-y divide-gray-100 max-h-60 overflow-y-auto">
+                {gastosHoy.length === 0 ? (
+                  <li className="text-sm text-gray-400 italic py-2">No hay gastos en esta fecha.</li>
+                ) : (
+                  gastosHoy.map(g => (
+                    <li key={g.dbId || g.id} className="py-3 flex justify-between items-center text-sm">
+                      <span className="text-gray-700 uppercase font-bold">{g.descripcion}</span>
+                      <div className="flex items-center gap-3">
+                        <span className="text-red-600 font-black">-${(g.monto || 0).toFixed(2)}</span>
+                        {esPatron && <button onClick={() => eliminarRegistro(g.dbId, g.id, 'gasto')} className="text-red-400 hover:text-red-600"><Iconos.Trash2 /></button>}
+                      </div>
+                    </li>
+                  ))
+                )}
+              </ul>
+            </div>
+          </div>
+        )}
+
+        {esPatron && vista === 'cierre' && (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="space-y-6">
+              <div className="bg-white p-6 rounded-xl shadow-lg border-t-4 border-indigo-500">
+                <h3 className="font-black text-gray-800 text-lg mb-4">Stock de Mercancía Físico</h3>
+                <div className="space-y-4">
+                  <div className="bg-indigo-50 p-4 rounded-lg flex flex-col gap-2 border border-indigo-100">
+                    <div className="flex justify-between items-center border-b border-indigo-200 pb-2 mb-1">
+                      <span className="font-black text-indigo-900">Stock Real en Hielera:</span>
+                      <span className={`text-4xl font-black ${stockPollos <= 5 ? 'text-red-600' : 'text-indigo-600'}`}>{stockPollos.toFixed(1)}</span>
+                    </div>
+                    <form onSubmit={agregarStockPollo} className="flex gap-2">
+                      <input type="number" step="0.5" placeholder="Sumar Compras (+)" value={ingresoPollo} onChange={(e) => setIngresoPollo(e.target.value)} className="flex-1 border p-2 rounded text-center font-bold outline-none focus:border-indigo-500" />
+                      <button type="submit" className="bg-indigo-600 text-white px-4 rounded font-bold">Sumar</button>
+                    </form>
+                    <form onSubmit={restarMermaPollo} className="flex gap-2 mt-1">
+                      <input type="number" step="0.5" placeholder="Restar Mermas (-)" value={mermaPollo} onChange={(e) => setMermaPollo(e.target.value)} className="flex-1 border border-red-300 p-2 rounded text-center font-bold outline-none text-red-600 focus:border-red-500" />
+                      <button type="submit" className="bg-red-600 text-white px-4 rounded font-bold">Restar</button>
+                    </form>
+                    <div className="flex justify-between text-indigo-800 font-bold text-xs mt-2 opacity-80">
+                      <span>Iniciaste el día con: {pollosInicialHoy}</span>
+                      <span>Vendidos ({diaSeleccionado}): {resHoy.pollos}</span>
+                    </div>
+                  </div>
+
+                  <div className="bg-blue-50 p-4 rounded-lg flex flex-col gap-2 border border-blue-100 mt-4">
+                    <div className="flex justify-between items-center border-b border-blue-200 pb-2 mb-1">
+                      <span className="font-black text-blue-900">Refrescos Reales:</span>
+                      <span className={`text-4xl font-black ${stockRefrescos <= 5 ? 'text-red-600' : 'text-blue-600'}`}>{stockRefrescos}</span>
+                    </div>
+                    <form onSubmit={agregarStockRefresco} className="flex gap-2">
+                      <input type="number" placeholder="Sumar Compras (+)" value={ingresoRefresco} onChange={(e) => setIngresoRefresco(e.target.value)} className="flex-1 border p-2 rounded text-center font-bold outline-none focus:border-blue-500" />
+                      <button type="submit" className="bg-blue-600 text-white px-4 rounded font-bold">Sumar</button>
+                    </form>
+                    <form onSubmit={restarMermaRefresco} className="flex gap-2 mt-1">
+                      <input type="number" placeholder="Restar Mermas (-)" value={mermaRefresco} onChange={(e) => setMermaRefresco(e.target.value)} className="flex-1 border border-red-300 p-2 rounded text-center font-bold outline-none text-red-600 focus:border-red-500" />
+                      <button type="submit" className="bg-red-600 text-white px-4 rounded font-bold">Restar</button>
+                    </form>
+                    <div className="flex justify-between text-blue-800 font-bold text-xs mt-2 opacity-80">
+                      <span>Iniciaste con: {refrescosInicialHoy}</span>
+                      <span>Vendidos ({diaSeleccionado}): {resHoy.refrescosVendidos}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-white p-6 rounded-xl shadow-lg border-t-4 border-green-500 h-fit">
+              <h3 className="font-black text-gray-800 text-lg mb-4">Corte de Caja ({diaSeleccionado})</h3>
+              <div className="space-y-2 text-sm font-bold text-gray-600">
+                <div className="flex justify-between p-2 bg-gray-50 rounded"><span>Ventas Totales (Bruto):</span> <span>${resHoy.ventasTotales.toFixed(2)}</span></div>
+                <div className="flex justify-between p-2 bg-green-50 text-green-800 rounded"><span>Cobrado en Efectivo:</span> <span>${resHoy.ingresoEfectivo.toFixed(2)}</span></div>
+                <div className="flex justify-between p-2 bg-purple-50 text-purple-800 rounded"><span>Cobrado x Transferencia:</span> <span>${resHoy.ingresoTransferencia.toFixed(2)}</span></div>
+                
+                <div className="flex justify-between p-2 bg-blue-50 text-blue-800 rounded mt-2">
+                  <span>Envíos a Domicilio Realizados:</span> <span>{resHoy.cantidadEnvios} Viajes</span>
+                </div>
+                
+                <div className="flex justify-between p-2 bg-orange-50 text-orange-900 rounded mt-2">
+                  <span>Costillas Asadas Vendidas:</span> <span>${resHoy.costillasVendido.toFixed(2)}</span>
+                </div>
+
+                <div className="my-2 border-b-2 border-dashed border-gray-200"></div>
+                
+                <div className="flex justify-between p-2 text-red-600"><span>Gastos Físicos de Caja:</span> <span>-${resHoy.totalGastos.toFixed(2)}</span></div>
+                <div className="flex justify-between p-2 text-orange-600"><span>Desc. Paquetes (Incluye $15 de Familiar):</span> <span>-${descPaquetesHoy.toFixed(2)}</span></div>
+                <div className="flex justify-between p-2 text-yellow-600"><span>Pago Tortilla Proveedor:</span> <span>-${pTortillaProveedor.toFixed(2)}</span></div>
+                <div className="flex justify-between p-2 text-blue-600"><span>Pago a Repartidores (En Efectivo):</span> <span>-${pEnviosRepartidorEfectivo.toFixed(2)}</span></div>
+                
+                <div className="flex justify-between p-2 bg-pink-50 text-pink-800 rounded mt-2">
+                  <span>Retiro Salchichas ({resHoy.salchichasVendidas} pz):</span> <span>-${dineroSalchichas.toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between p-2 bg-amber-50 text-amber-800 rounded mt-2">
+                  <span>Retiro Frijoles ({resHoy.frijolesVendidos} pz):</span> <span>-${dineroFrijoles.toFixed(2)}</span>
+                </div>
+              </div>
+              <div className="mt-6 p-4 bg-green-600 rounded-lg text-white text-center shadow-inner">
+                <span className="block text-sm uppercase tracking-wider mb-1 font-semibold">Dinero Físico Neto en Caja</span>
+                <span className="text-4xl font-black">${corteNetoFisicoHoy.toFixed(2)}</span>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {esPatron && vista === 'utilidad' && (
+          <div className="max-w-3xl mx-auto space-y-6">
+            <div className="bg-white p-6 rounded-xl shadow-lg border-t-4 border-orange-500">
+              <h2 className="font-black text-xl text-gray-800 mb-2">Cálculo de Ganancia Real y Diezmo ({diaSeleccionado})</h2>
+              <div className="flex items-center gap-4 bg-orange-50 p-4 rounded-lg border border-orange-200 mb-6">
+                 <div>
+                    <label className="block text-xs font-bold text-orange-800 uppercase mb-1">Costo Operativo por Pollo ($)</label>
+                    <input type="number" step="0.5" value={costoPolloUnidad} onChange={(e) => setCostoPolloUnidad(e.target.value)} onBlur={(e) => guardarCostoMateriaPrima(e.target.value)} className="w-32 p-2 border rounded font-black text-xl text-center outline-none focus:border-orange-500" />
+                 </div>
+                 <div className="text-sm font-semibold text-orange-900 opacity-80 leading-tight">
+                    El sistema multiplicará este costo operativo por los {resHoy.pollos} pollos vendidos el {diaSeleccionado}.
+                 </div>
+              </div>
+
+              <div className="space-y-2 text-sm font-bold text-gray-700 bg-gray-50 p-4 rounded-lg border">
+                <div className="flex justify-between pb-2 border-b"><span>(+) Ingresos Netos (Sin Descuentos Paquete):</span> <span className="text-green-600">${ventasNetasReales.toFixed(2)}</span></div>
+                <div className="flex justify-between pt-2"><span>(-) Costo de Producción Pollos:</span> <span className="text-red-600">-${costoTotalProduccion.toFixed(2)}</span></div>
+                <div className="flex justify-between"><span>(-) Costo de Tortillas:</span> <span className="text-red-600">-${pTortillaProveedor.toFixed(2)}</span></div>
+                <div className="flex justify-between"><span>(-) Pago Envíos Totales:</span> <span className="text-red-600">-${(resHoy.costoEnvioEfectivo + resHoy.costoEnvioTransferencia).toFixed(2)}</span></div>
+                <div className="flex justify-between"><span>(-) Otros Gastos Físicos del Local:</span> <span className="text-red-600">-${resHoy.totalGastos.toFixed(2)}</span></div>
+                <div className="flex justify-between"><span>(-) Retiro Extras (Salchichas y Frijoles):</span> <span className="text-red-600">-${totalRetiroExtras.toFixed(2)}</span></div>
+              </div>
+
+              <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-4">
+                 <div className="p-6 bg-gray-900 text-white rounded-xl shadow text-center">
+                    <span className="block text-xs uppercase opacity-80 tracking-widest mb-2 font-bold">Ganancia Libre del Día</span>
+                    <span className="text-4xl font-black">${utilidadRealHoy.toFixed(2)}</span>
+                 </div>
+                 <div className="p-6 bg-yellow-500 text-yellow-900 rounded-xl shadow text-center border-2 border-yellow-600">
+                    <span className="block text-xs uppercase opacity-80 tracking-widest mb-2 font-black">Diezmo Sugerido (10%)</span>
+                    <span className="text-5xl font-black text-white drop-shadow-md">${diezmoSugerido.toFixed(2)}</span>
+                 </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {esPatron && vista === 'vip' && (
+          <div className="max-w-4xl mx-auto space-y-6">
+            <div className="bg-gray-900 rounded-xl shadow-lg border-t-4 border-blue-500 overflow-hidden text-white p-4 sm:p-6">
+              <h3 className="font-black text-lg flex items-center gap-2 mb-2"><Iconos.Users /> Importar Cliente a la Agenda (Sin Ventas)</h3>
+              <form onSubmit={agregarClienteManual} className="flex flex-col sm:flex-row gap-3">
+                 <input type="text" placeholder="Teléfono a 10 dígitos..." value={nuevoClienteManual.telefono} onChange={(e) => setNuevoClienteManual({...nuevoClienteManual, telefono: e.target.value.replace(/\D/g, '').slice(0, 10)})} className="flex-1 p-3 rounded-lg font-bold text-gray-900 outline-none focus:ring-2 focus:ring-blue-500" />
+                 <input type="text" placeholder="Nombre completo..." value={nuevoClienteManual.nombre} onChange={(e) => setNuevoClienteManual({...nuevoClienteManual, nombre: e.target.value})} className="flex-1 p-3 rounded-lg font-bold text-gray-900 outline-none focus:ring-2 focus:ring-blue-500" />
+                 <button type="submit" className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg shadow-md transition-colors"><Iconos.PlusCircle /> Guardar Cliente</button>
               </form>
             </div>
 
-            <div className="bg-white p-6 rounded-xl shadow-lg border">
-              <h3 className="font-bold text-lg mb-3">Gastos de Hoy ({hoyStr})</h3>
-              <div className="space-y-2 max-h-60 overflow-y-auto">
-                {gastosHoy.map(g => (
-                  <div key={g.dbId} className="flex justify-between items-center p-3 bg-red-50 border border-red-100 rounded-lg">
-                    <div>
-                      <span className="font-bold block text-gray-800">{g.descripcion}</span>
-                      <span className="text-xs text-red-500 font-bold">${g.monto.toFixed(2)}</span>
+            <div className="bg-white rounded-xl shadow-lg border-t-4 border-orange-500 overflow-hidden">
+               <div className="bg-gray-800 p-4 text-white">
+                  <h3 className="font-black text-lg flex items-center gap-2"><Iconos.Star /> Bóveda de Fidelización: Clientes VIP</h3>
+               </div>
+               <div className="p-4 space-y-4 max-h-[600px] overflow-y-auto">
+                  {clientesVIP.length === 0 ? (
+                    <p className="text-sm text-gray-500 italic text-center py-6">Aún no hay clientes registrados con número telefónico.</p>
+                  ) : (
+                    clientesVIP.map((cliente, index) => {
+                      let colorFondo = "bg-gray-50 border-gray-200";
+                      let etiquetaStatus = "Cliente Nuevo";
+                      let colorBadge = "bg-gray-200 text-gray-600 border-gray-300";
+
+                      if (cliente.totalPedidos > 0 && cliente.totalPedidos <= 2) { colorBadge = "bg-red-100 text-red-800 border-red-200"; etiquetaStatus = "Cliente Ocasional"; } 
+                      else if (cliente.totalPedidos >= 3 && cliente.totalPedidos <= 6) { colorFondo = "bg-blue-50/50 border-blue-100"; etiquetaStatus = "Cliente Frecuente"; colorBadge = "bg-blue-100 text-blue-800 border-blue-200"; } 
+                      else if (cliente.totalPedidos >= 7) { colorFondo = "bg-green-50 border-green-200 ring-2 ring-green-600/20"; etiquetaStatus = "👑 VIP MASTER"; colorBadge = "bg-green-600 text-white font-black"; }
+
+                      return (
+                        <div key={cliente.telefono} className={`p-4 rounded-xl border flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 ${colorFondo}`}>
+                           <div className="space-y-1">
+                              <div className="flex items-center gap-3">
+                                 <span className="font-black text-gray-400 text-sm">#{index + 1}</span>
+                                 <h4 className="font-black text-base text-gray-900 uppercase">{cliente.nombre}</h4>
+                                 <span className={`text-[10px] uppercase font-bold px-2.5 py-0.5 rounded-full border ${colorBadge}`}>{etiquetaStatus}</span>
+                              </div>
+                              <p className="text-sm font-mono text-gray-600 font-bold">📞 Teléfono: {cliente.telefono}</p>
+                           </div>
+                           <div className="flex gap-4 w-full sm:w-auto border-t sm:border-t-0 pt-2 sm:pt-0 justify-between">
+                              <div className="text-center bg-white px-3 py-1.5 rounded-lg border shadow-sm">
+                                 <span className="block text-[9px] font-black text-gray-400 uppercase tracking-wider">Pedidos</span>
+                                 <span className="text-xl font-black text-gray-800">{cliente.totalPedidos}</span>
+                              </div>
+                              <div className="text-center bg-white px-3 py-1.5 rounded-lg border shadow-sm">
+                                 <span className="block text-[9px] font-black text-gray-400 uppercase tracking-wider">Pollos</span>
+                                 <span className="text-xl font-black text-orange-600">{cliente.totalPollos} kg</span>
+                              </div>
+                           </div>
+                        </div>
+                      );
+                    })
+                  )}
+               </div>
+            </div>
+          </div>
+        )}
+
+        {esPatron && vista === 'historial' && (
+          <div className="bg-white rounded-xl shadow-lg border-t-4 border-gray-800 overflow-hidden">
+            <div className="bg-gray-800 p-4 flex flex-col sm:flex-row justify-between items-center gap-4">
+               <h3 className="font-black text-white text-lg">Historial Completo de Auditoría</h3>
+               <button onClick={exportarExcel} className="bg-green-600 hover:bg-green-700 text-white text-xs px-4 py-3 rounded-lg font-bold flex items-center gap-2 shadow-lg border border-green-500 w-full sm:w-auto justify-center"><Iconos.Download /> EXPORTAR EXCEL (TODO EL HISTORIAL)</button>
+            </div>
+            <div className="divide-y-4 divide-gray-200">
+              {historialDias.length === 0 ? (
+                 <p className="p-6 text-center text-gray-500 font-bold">No hay registros de días anteriores todavía.</p>
+              ) : (
+                historialDias.map(dia => {
+                  const resDia = calcularResumen(dia.ventas, dia.gastos);
+                  const descPaquetesDia = resDia.paquetesDescuento || 0;
+                  const tortillaDia = historialTortillas[dia.fecha.replace(/\//g, '-')] || { dejo: 0, regreso: 0 };
+                  const kgTortillaDia = (tortillaDia.dejo || 0) - (tortillaDia.regreso || 0);
+                  const pTortillaDia = kgTortillaDia * 21;
+                  const pEnviosEfectivoDia = resDia.costoEnvioEfectivo || 0;
+                  const extrasMontoDia = (resDia.salchichasVendidas * PRECIOS.salchichas) + (resDia.frijolesVendidos * PRECIOS.frijoles);
+                  const efectivoNetoFisicoDia = resDia.ingresoEfectivo - resDia.totalGastos - descPaquetesDia - pTortillaDia - pEnviosEfectivoDia - extrasMontoDia;
+
+                  return (
+                    <div key={dia.fecha} className="p-4 sm:p-6 bg-gray-50">
+                      <h4 className="font-black text-xl text-orange-600 mb-4">{dia.fecha}</h4>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                        <div className="bg-white p-3 rounded shadow-sm border border-gray-100 text-center">
+                          <span className="block text-[10px] text-gray-400 uppercase font-bold">Ventas Brutas</span>
+                          <span className="block text-lg font-black text-gray-800">${resDia.ventasTotales.toFixed(2)}</span>
+                        </div>
+                        <div className="bg-white p-3 rounded shadow-sm border border-purple-100 text-center">
+                          <span className="block text-[10px] text-gray-400 uppercase font-bold">Transferencias</span>
+                          <span className="block text-lg font-black text-purple-600">${resDia.ingresoTransferencia.toFixed(2)}</span>
+                        </div>
+                        <div className="bg-white p-3 rounded shadow-sm border border-blue-100 text-center">
+                          <span className="block text-[10px] text-gray-400 uppercase font-bold">Pollos Vendidos</span>
+                          <span className="block text-lg font-black text-blue-600">{resDia.pollos}</span>
+                        </div>
+                        
+                        <div className="bg-white p-3 rounded shadow-sm border border-green-100 text-center">
+                          <span className="block text-[10px] text-gray-400 uppercase font-bold">Efectivo Cobrado</span>
+                          <span className="block text-lg font-black text-green-600">${resDia.ingresoEfectivo.toFixed(2)}</span>
+                        </div>
+                        <div className="bg-white p-3 rounded shadow-sm border border-red-100 text-center">
+                          <span className="block text-[10px] text-gray-400 uppercase font-bold">Gastos Físicos</span>
+                          <span className="block text-lg font-black text-red-600">-${resDia.totalGastos.toFixed(2)}</span>
+                        </div>
+                        <div className="bg-white p-3 rounded shadow-sm border border-orange-100 text-center">
+                          <span className="block text-[10px] text-gray-400 uppercase font-bold">Costillas Vendidas</span>
+                          <span className="block text-lg font-black text-orange-600">${resDia.costillasVendido.toFixed(2)}</span>
+                        </div>
+                        
+                        <div className="col-span-2 sm:col-span-3 bg-pink-50 p-3 rounded shadow-sm border border-pink-200 text-center flex justify-around">
+                          <div>
+                            <span className="block text-[10px] text-pink-700 uppercase font-bold">Salchichas</span>
+                            <span className="block text-lg font-black text-pink-900">{resDia.salchichasVendidas}</span>
+                          </div>
+                          <div>
+                            <span className="block text-[10px] text-orange-700 uppercase font-bold">Frijoles</span>
+                            <span className="block text-lg font-black text-orange-900">{resDia.frijolesVendidos}</span>
+                          </div>
+                          <div>
+                            <span className="block text-[10px] text-blue-700 uppercase font-bold">Extras Manuales</span>
+                            <span className="block text-lg font-black text-blue-900">${resDia.extrasManualesTotales.toFixed(2)}</span>
+                          </div>
+                        </div>
+
+                        <div className="col-span-2 sm:col-span-3 bg-green-600 p-4 rounded-lg shadow-md text-center text-white mt-2">
+                           <span className="block text-xs uppercase font-bold opacity-80 tracking-widest mb-1">Efectivo Físico Neto a Entregar</span>
+                           <span className="block text-3xl font-black">${efectivoNetoFisicoDia.toFixed(2)}</span>
+                        </div>
+                      </div>
                     </div>
-                    {esPatron && (
-                      <button onClick={() => eliminarRegistro(g.dbId, g.id, 'gasto')} className="text-red-600 hover:bg-red-200 p-2 rounded"><Iconos.Trash2 /></button>
-                    )}
-                  </div>
-                ))}
-              </div>
+                  );
+                })
+              )}
             </div>
           </div>
         )}
-
-        {/* VISTA CIERRE / STOCK */}
-        {vista === 'cierre' && esPatron && (
-          <div className="space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="bg-white p-5 rounded-xl shadow border border-l-4 border-l-blue-500">
-                <h3 className="font-black text-gray-700 mb-2">Stock Actual Pollos</h3>
-                <p className="text-3xl font-black text-blue-600">{stockPollos.toFixed(1)} <span className="text-sm font-normal text-gray-500">piezas</span></p>
-                <form onSubmit={agregarStockPollo} className="mt-3 flex gap-2">
-                  <input type="number" value={ingresoPollo} onChange={(e) => setIngresoPollo(e.target.value)} placeholder="Entrada hoy" className="w-full p-2 border rounded font-bold text-sm" />
-                  <button type="submit" className="bg-blue-600 text-white px-4 rounded font-bold text-sm">Entrada</button>
-                </form>
-                <form onSubmit={restarMermaPollo} className="mt-2 flex gap-2">
-                  <input type="number" value={mermaPollo} onChange={(e) => setMermaPollo(e.target.value)} placeholder="Merma" className="w-full p-2 border rounded font-bold text-sm" />
-                  <button type="submit" className="bg-red-600 text-white px-4 rounded font-bold text-sm">Merma</button>
-                </form>
-              </div>
-
-              <div className="bg-white p-5 rounded-xl shadow border border-l-4 border-l-green-500">
-                <h3 className="font-black text-gray-700 mb-2">Stock Actual Refrescos</h3>
-                <p className="text-3xl font-black text-green-600">{stockRefrescos} <span className="text-sm font-normal text-gray-500">piezas</span></p>
-                <form onSubmit={agregarStockRefresco} className="mt-3 flex gap-2">
-                  <input type="number" value={ingresoRefresco} onChange={(e) => setIngresoRefresco(e.target.value)} placeholder="Entrada hoy" className="w-full p-2 border rounded font-bold text-sm" />
-                  <button type="submit" className="bg-green-600 text-white px-4 rounded font-bold text-sm">Entrada</button>
-                </form>
-                <form onSubmit={restarMermaRefresco} className="mt-2 flex gap-2">
-                  <input type="number" value={mermaRefresco} onChange={(e) => setMermaRefresco(e.target.value)} placeholder="Merma" className="w-full p-2 border rounded font-bold text-sm" />
-                  <button type="submit" className="bg-red-600 text-white px-4 rounded font-bold text-sm">Merma</button>
-                </form>
-              </div>
-            </div>
-
-            <div className="bg-white p-6 rounded-xl shadow border space-y-4">
-              <h3 className="font-black text-lg text-gray-800 border-b pb-2">Control de Tortillas (Proveedor)</h3>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <div>
-                  <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Kg Dejados</label>
-                  <input type="number" value={tortillaProv.dejo || ''} onChange={(e) => actualizarTortillaProv('dejo', e.target.value)} placeholder="0" className="w-full p-2 border rounded font-bold" />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Kg Regresados</label>
-                  <input type="number" value={tortillaProv.regreso || ''} onChange={(e) => actualizarTortillaProv('regreso', e.target.value)} placeholder="0" className="w-full p-2 border rounded font-bold" />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Pago Proveedor ($21/kg)</label>
-                  <p className="text-xl font-black text-orange-600 p-2">${pTortillaProveedor.toFixed(2)}</p>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* VISTA UTILIDAD */}
-        {vista === 'utilidad' && esPatron && (
-          <div className="space-y-6">
-            <div className="bg-white p-6 rounded-xl shadow border space-y-4">
-              <h2 className="text-xl font-black text-gray-800 border-b pb-2 flex justify-between items-center">
-                <span>Resumen Financiero - Hoy ({hoyStr})</span>
-                <button onClick={exportarExcel} className="bg-green-700 text-white px-4 py-2 rounded-lg font-bold text-sm flex items-center gap-2"><Iconos.Download /> Exportar Excel</button>
-              </h2>
-
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <div className="bg-gray-50 p-4 rounded-lg border">
-                  <span className="block text-xs font-bold text-gray-500 uppercase">Ventas Brutas</span>
-                  <span className="text-2xl font-black text-gray-800">${resHoy.ventasTotales.toFixed(2)}</span>
-                </div>
-                <div className="bg-green-50 p-4 rounded-lg border border-green-200">
-                  <span className="block text-xs font-bold text-green-700 uppercase">Efectivo Cobrado</span>
-                  <span className="text-2xl font-black text-green-700">${resHoy.ingresoEfectivo.toFixed(2)}</span>
-                </div>
-                <div className="bg-purple-50 p-4 rounded-lg border border-purple-200">
-                  <span className="block text-xs font-bold text-purple-700 uppercase">Transferencias</span>
-                  <span className="text-2xl font-black text-purple-700">${resHoy.ingresoTransferencia.toFixed(2)}</span>
-                </div>
-              </div>
-
-              <div className="bg-amber-50 border border-amber-200 p-4 rounded-xl space-y-2">
-                <h3 className="font-bold text-amber-900 border-b border-amber-200 pb-1">Corte Neto Físico en Caja</h3>
-                <div className="flex justify-between text-sm text-amber-800"><span>Efectivo Cobrado:</span><span>${resHoy.ingresoEfectivo.toFixed(2)}</span></div>
-                <div className="flex justify-between text-sm text-red-600"><span>Gastos Físicos:</span><span>-${resHoy.totalGastos.toFixed(2)}</span></div>
-                <div className="flex justify-between text-sm text-red-600"><span>Tortillería:</span><span>-${pTortillaProveedor.toFixed(2)}</span></div>
-                <div className="flex justify-between text-sm text-red-600"><span>Retiro Extras:</span><span>-${totalRetiroExtras.toFixed(2)}</span></div>
-                <div className="flex justify-between text-base font-black text-amber-950 border-t pt-1"><span>Efectivo Neto a Entregar:</span><span>${corteNetoFisicoHoy.toFixed(2)}</span></div>
-              </div>
-
-              <div className="bg-green-900 text-white p-5 rounded-xl space-y-3">
-                <h3 className="font-black text-orange-400 text-lg border-b border-gray-700 pb-1">Utilidad Libre Real</h3>
-                <div className="flex justify-between text-sm"><span>Ventas Reales:</span><span className="font-bold">${ventasNetasReales.toFixed(2)}</span></div>
-                <div className="flex justify-between text-sm text-red-300"><span>Costo Pollo (${costoPolloUnidad}/u):</span><span>-${costoTotalProduccion.toFixed(2)}</span></div>
-                <div className="flex justify-between text-xl font-black text-green-400 border-t border-gray-700 pt-2"><span>Ganancia Neta:</span><span>${utilidadRealHoy.toFixed(2)}</span></div>
-                <div className="flex justify-between text-sm text-yellow-300 border-t border-gray-800 pt-1"><span>Diezmo Sugerido (10%):</span><span>${diezmoSugerido.toFixed(2)}</span></div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* VISTA VIP */}
-        {vista === 'vip' && esPatron && (
-          <div className="space-y-6">
-            <div className="bg-white p-6 rounded-xl shadow border">
-              <h2 className="text-xl font-bold mb-4 flex items-center gap-2 text-orange-600"><Iconos.Star /> Clientes VIP</h2>
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-sm">
-                  <thead className="bg-gray-100 font-bold border-b">
-                    <tr>
-                      <th className="p-2">Cliente</th>
-                      <th className="p-2">Teléfono</th>
-                      <th className="p-2">Pollos Comprados</th>
-                      <th className="p-2">Pedidos</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {clientesVIP.map((c, idx) => (
-                      <tr key={idx} className="border-b hover:bg-gray-50">
-                        <td className="p-2 font-bold">{c.nombre}</td>
-                        <td className="p-2">{c.telefono}</td>
-                        <td className="p-2 font-bold text-orange-600">{c.totalPollos}</td>
-                        <td className="p-2">{c.totalPedidos}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* VISTA HISTORIAL */}
-        {vista === 'historial' && esPatron && (
-          <div className="space-y-6">
-            <div className="bg-white p-6 rounded-xl shadow border">
-              <h2 className="text-xl font-bold mb-4 flex items-center gap-2"><Iconos.CalendarDays /> Historial de Ventas</h2>
-              <div className="space-y-4 max-h-[600px] overflow-y-auto">
-                {ventas.map(v => (
-                  <div key={v.dbId} className="p-4 border rounded-lg bg-gray-50 flex justify-between items-center">
-                    <div>
-                      <span className="font-bold block text-gray-800">{v.fechaDia} - {v.hora} ({v.tipo.toUpperCase()})</span>
-                      <span className="text-xs text-gray-600 block">{v.nombreCliente} {v.telefono}</span>
-                      <span className="text-xs font-bold text-orange-600">${v.total.toFixed(2)} ({v.metodoPago})</span>
-                    </div>
-                    <button onClick={() => eliminarRegistro(v.dbId, v.id, 'venta')} className="text-red-600 p-2 hover:bg-red-100 rounded"><Iconos.Trash2 /></button>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        )}
-
       </main>
     </div>
   );
 }
 
-// 7. Renderizamos la aplicación en el DOM
 const root = ReactDOM.createRoot(document.getElementById('root'));
 root.render(<App />);
